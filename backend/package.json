@@ -5,7 +5,7 @@
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
-    "start": "node server.js",
+    "start": "node server",
     "dev": "nodemon server.js",
     "setup": "node src/utils/mongodb-setup.js",
     "seed": "node src/utils/seeder-runner.js",
