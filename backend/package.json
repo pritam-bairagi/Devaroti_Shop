@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node server",
     "dev": "nodemon server.js",
+    "vercel-start": "node server.js"'
     "setup": "node src/utils/mongodb-setup.js",
     "seed": "node src/utils/seeder-runner.js",
     "seed-products": "node src/utils/productSeeder-runner.js",
