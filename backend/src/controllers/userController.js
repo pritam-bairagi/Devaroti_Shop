@@ -18,7 +18,8 @@ exports.getProfile = async (req, res) => {
       })
       .populate({
         path: 'favorites',
-        select: 'name price sellingPrice image stock category liveStatus'
+        select: 'name price sellingPrice image stock category liveStatus user',
+        populate: { path: 'user', select: 'name shopName' }
       });
 
     if (!user) {
@@ -90,8 +91,8 @@ exports.updateProfile = async (req, res) => {
 
     const updatedUser = await User.findById(user._id)
       .select('-password -otp -otpExpire -resetPasswordToken -resetPasswordExpires')
-      .populate({ path: 'cart.product', select: 'name price sellingPrice image stock category user', populate: { path: 'user', select: 'name shopName' } })
-      .populate('favorites', 'name price sellingPrice image stock category');
+      .populate({ path: 'cart.product', select: 'name price mrp sellingPrice image stock category user', populate: { path: 'user', select: 'name shopName' } })
+      .populate({ path: 'favorites', select: 'name price mrp sellingPrice image stock category user', populate: { path: 'user', select: 'name shopName' } });
 
     res.status(200).json({ success: true, message: 'Profile updated successfully', user: updatedUser });
   } catch (error) {
@@ -112,7 +113,7 @@ exports.updateProfile = async (req, res) => {
 //   3. mongoose $inc on user.save() sometimes triggering validation errors on address sub-docs
 exports.addToCart = async (req, res) => {
   try {
-    const { productId, quantity = 1 } = req.body;
+    const { productId, quantity = 1, variant } = req.body;
 
     if (!productId) {
       return res.status(400).json({ success: false, message: 'Product ID is required' });
@@ -151,24 +152,45 @@ exports.addToCart = async (req, res) => {
     }
 
     const cartItemIndex = user.cart.findIndex(
-      item => item.product && item.product.toString() === productId
+      item => item.product && item.product.toString() === productId && 
+              ((!variant && !item.variant?.name) || (variant?.name === item.variant?.name))
     );
+
+    const variantPrice = (variant && variant.name) 
+      ? product.variants.find(v => v.name === variant.name)?.price 
+      : null;
+    const finalPrice = variantPrice || product.sellingPrice;
+
+    // Get stock for specific variant if applicable
+    let availableStock = product.stock;
+    if (variant && variant.name) {
+      const v = product.variants.find(v => v.name === variant.name);
+      if (v) availableStock = v.stock;
+    }
 
     if (cartItemIndex > -1) {
       const newQty = user.cart[cartItemIndex].quantity + qty;
-      if (product.stock < newQty) {
-        return res.status(400).json({ success: false, message: `Cannot add more than ${product.stock} units` });
+      if (availableStock < newQty) {
+        return res.status(400).json({ success: false, message: `Only ${availableStock} units available for this variant` });
       }
       user.cart[cartItemIndex].quantity = newQty;
+      user.cart[cartItemIndex].price = finalPrice;
     } else {
-      user.cart.push({ product: productId, quantity: qty });
+      if (availableStock < qty) {
+        return res.status(400).json({ success: false, message: `Only ${availableStock} units available for this variant` });
+      }
+      user.cart.push({ product: productId, quantity: qty, variant, price: finalPrice });
     }
 
     // FIX: save only cart field using $set to bypass address validators
     await User.findByIdAndUpdate(req.user.id, { $set: { cart: user.cart } });
 
     const updatedUser = await User.findById(req.user.id)
-      .populate({ path: 'cart.product', select: 'name price sellingPrice image stock category user', populate: { path: 'user', select: 'name shopName' } });
+      .populate({ 
+        path: 'cart.product', 
+        select: 'name price sellingPrice image stock category user', 
+        populate: { path: 'user', select: 'name shopName' } 
+      });
 
     res.status(200).json({
       success: true,
@@ -187,10 +209,10 @@ exports.addToCart = async (req, res) => {
 exports.updateCartItem = async (req, res) => {
   try {
     const { quantity } = req.body;
-    const { productId } = req.params;
+    const { cartItemId } = req.params;
 
-    if (!mongoose.Types.ObjectId.isValid(productId)) {
-      return res.status(400).json({ success: false, message: 'Invalid product ID' });
+    if (!mongoose.Types.ObjectId.isValid(cartItemId)) {
+      return res.status(400).json({ success: false, message: 'Invalid cart item ID' });
     }
 
     const qty = Number(quantity);
@@ -199,24 +221,44 @@ exports.updateCartItem = async (req, res) => {
     }
 
     const user = await User.findById(req.user.id);
-    const cartItem = user.cart.find(item => item.product && item.product.toString() === productId);
+    const cartItem = user.cart.id(cartItemId);
 
     if (!cartItem) {
       return res.status(404).json({ success: false, message: 'Item not found in cart' });
     }
 
-    const product = await Product.findById(productId);
-    if (product && product.stock < qty) {
+    const product = await Product.findById(cartItem.product);
+    if (!product) {
+      return res.status(404).json({ success: false, message: 'Product no longer exists' });
+    }
+
+    // CHECK VARIANT STOCK IF APPLICABLE
+    if (cartItem.variant && cartItem.variant.name) {
+      const variant = product.variants.find(v => v.name === cartItem.variant.name);
+      if (variant && variant.stock < qty) {
+        return res.status(400).json({ success: false, message: `Only ${variant.stock} units of ${variant.name} available` });
+      }
+    } else if (product.stock < qty) {
       return res.status(400).json({ success: false, message: `Only ${product.stock} units available` });
     }
 
     cartItem.quantity = qty;
+    
+    // Update price too just in case it changed in DB
+    const variantPrice = (cartItem.variant && cartItem.variant.name) 
+      ? product.variants.find(v => v.name === cartItem.variant.name)?.price 
+      : null;
+    cartItem.price = variantPrice || product.sellingPrice;
 
     // FIX: use atomic update to avoid sub-document validation issues
     await User.findByIdAndUpdate(req.user.id, { $set: { cart: user.cart } });
 
     const updatedUser = await User.findById(req.user.id)
-      .populate({ path: 'cart.product', select: 'name price sellingPrice image stock category user', populate: { path: 'user', select: 'name shopName' } });
+      .populate({ 
+        path: 'cart.product', 
+        select: 'name price sellingPrice image stock category user', 
+        populate: { path: 'user', select: 'name shopName' } 
+      });
 
     res.status(200).json({ success: true, message: 'Cart updated', cart: updatedUser.cart });
   } catch (error) {
@@ -230,21 +272,23 @@ exports.updateCartItem = async (req, res) => {
 // @access  Private
 exports.removeFromCart = async (req, res) => {
   try {
-    const { productId } = req.params;
+    const { cartItemId } = req.params;
 
-    if (!mongoose.Types.ObjectId.isValid(productId)) {
-      return res.status(400).json({ success: false, message: 'Invalid product ID' });
+    if (!mongoose.Types.ObjectId.isValid(cartItemId)) {
+      return res.status(400).json({ success: false, message: 'Invalid cart item ID' });
     }
 
     const user = await User.findById(req.user.id);
-    const updatedCart = user.cart.filter(
-      item => item.product && item.product.toString() !== productId
-    );
+    user.cart.pull(cartItemId);
 
-    await User.findByIdAndUpdate(req.user.id, { $set: { cart: updatedCart } });
+    await User.findByIdAndUpdate(req.user.id, { $set: { cart: user.cart } });
 
     const updatedUser = await User.findById(req.user.id)
-      .populate({ path: 'cart.product', select: 'name price sellingPrice image stock category user', populate: { path: 'user', select: 'name shopName' } });
+      .populate({ 
+        path: 'cart.product', 
+        select: 'name price sellingPrice image stock category user', 
+        populate: { path: 'user', select: 'name shopName' } 
+      });
 
     res.status(200).json({ success: true, message: 'Item removed from cart', cart: updatedUser.cart });
   } catch (error) {
@@ -297,7 +341,7 @@ exports.toggleFavorite = async (req, res) => {
     await User.findByIdAndUpdate(req.user.id, { $set: { favorites: user.favorites } });
 
     const updatedUser = await User.findById(req.user.id)
-      .populate('favorites', 'name price sellingPrice image stock category');
+      .populate({ path: 'favorites', select: 'name price mrp sellingPrice image stock category user', populate: { path: 'user', select: 'name shopName' } });
 
     res.status(200).json({ success: true, message, favorites: updatedUser.favorites });
   } catch (error) {
@@ -312,7 +356,7 @@ exports.toggleFavorite = async (req, res) => {
 exports.getFavorites = async (req, res) => {
   try {
     const user = await User.findById(req.user.id)
-      .populate('favorites', 'name price sellingPrice image stock category liveStatus');
+      .populate({ path: 'favorites', select: 'name price mrp sellingPrice image stock category liveStatus user', populate: { path: 'user', select: 'name shopName' } });
 
     res.status(200).json({ success: true, favorites: user.favorites });
   } catch (error) {
@@ -449,7 +493,7 @@ exports.getUserById = async (req, res) => {
 
     const user = await User.findById(req.params.id)
       .select('-password -otp -otpExpire -resetPasswordToken -resetPasswordExpires')
-      .populate('cart.product')
+      .populate({ path: 'cart.product', select: 'name price mrp sellingPrice image stock category user', populate: { path: 'user', select: 'name shopName' } })
       .populate('favorites');
 
     if (!user) {

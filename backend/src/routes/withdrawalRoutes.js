@@ -4,6 +4,7 @@ const router = express.Router();
 const { protect, admin, seller } = require('../middleware/authMiddleware');
 const Withdrawal = require('../models/Withdrawal');
 const Order = require('../models/Order');
+const User = require('../models/User');
 
 // ==================== CONTROLLER FUNCTIONS ====================
 
@@ -16,61 +17,36 @@ const createWithdrawal = async (req, res) => {
     const sellerId = req.user.id;
 
     // Validate amount
-    if (!amount || amount < 100) {
+    if (!amount || Number(amount) < 100) {
       return res.status(400).json({ 
         success: false, 
         message: 'Minimum withdrawal amount is 100 Taka' 
       });
     }
 
-    if (amount > 500000) {
+    if (Number(amount) > 500000) {
       return res.status(400).json({ 
         success: false, 
         message: 'Maximum withdrawal amount per request is 500,000 Taka' 
       });
     }
 
-    // Calculate seller's available balance
-    const orders = await Order.find({ 
-      'items.seller': sellerId,
-      status: 'delivered'
-    });
+    // Use User.cashBox as single source of truth for available balance
+    const sellerUser = await User.findById(sellerId);
+    if (!sellerUser) return res.status(404).json({ success: false, message: 'Seller not found' });
 
-    let totalEarnings = 0;
-    orders.forEach(order => {
-      const sellerItems = order.items.filter(item => 
-        item.seller?.toString() === sellerId
-      );
-      sellerItems.forEach(item => {
-        totalEarnings += item.price * item.quantity * 0.98; // After 2% commission
-      });
-    });
+    const availableBalance = sellerUser.cashBox || 0;
 
-    // Get completed withdrawals
-    const completedWithdrawals = await Withdrawal.find({ 
-      seller: sellerId, 
-      status: 'completed' 
-    });
-    const totalWithdrawn = completedWithdrawals.reduce((sum, w) => sum + w.netAmount, 0);
-
-    // Get pending withdrawals
-    const pendingWithdrawals = await Withdrawal.find({ 
-      seller: sellerId, 
-      status: 'pending' 
-    });
-    const pendingAmount = pendingWithdrawals.reduce((sum, w) => sum + w.amount, 0);
-
-    const availableBalance = totalEarnings - totalWithdrawn - pendingAmount;
-
-    if (amount > availableBalance) {
+    if (Number(amount) > availableBalance) {
       return res.status(400).json({ 
         success: false, 
-        message: `Insufficient balance. Available: ৳${availableBalance.toLocaleString()}` 
+        message: `Insufficient balance. Available: ৳${availableBalance.toLocaleString('en-BD', { maximumFractionDigits: 0 })}` 
       });
     }
 
-    // Check pending withdrawals count
-    if (pendingWithdrawals.length >= 3) {
+    // Check pending withdrawals count (max 3 pending at a time)
+    const pendingCount = await Withdrawal.countDocuments({ seller: sellerId, status: 'pending' });
+    if (pendingCount >= 3) {
       return res.status(400).json({ 
         success: false, 
         message: 'You have too many pending requests. Please wait for previous requests to be processed.' 
@@ -78,23 +54,29 @@ const createWithdrawal = async (req, res) => {
     }
 
     // Calculate service charge (2%)
-    const serviceCharge = amount * 0.02;
-    const netAmount = amount - serviceCharge;
+    const parsedAmount = parseFloat(amount);
+    const serviceCharge = parsedAmount * 0.02;
+    const netAmount = parsedAmount - serviceCharge;
 
-    // Create withdrawal
+    // Create withdrawal record
     const withdrawal = new Withdrawal({
       seller: sellerId,
-      amount: parseFloat(amount),
+      amount: parsedAmount,
       serviceCharge,
       netAmount,
       paymentMethod,
       accountNumber,
-      accountName,
+      accountName: accountName || '',
       sellerNote: sellerNote || '',
       status: 'pending'
     });
 
+    // ATOMICALLY deduct from seller cashBox and add to pending
+    sellerUser.cashBox = Math.max(0, sellerUser.cashBox - parsedAmount);
+    sellerUser.pendingWithdrawals = (sellerUser.pendingWithdrawals || 0) + parsedAmount;
+
     await withdrawal.save();
+    await sellerUser.save();
     await withdrawal.populate('seller', 'name email shopName');
 
     res.status(201).json({
@@ -106,8 +88,7 @@ const createWithdrawal = async (req, res) => {
     console.error('Create withdrawal error:', error);
     res.status(500).json({ 
       success: false, 
-      message: 'Failed to create withdrawal request',
-      error: error.message 
+      message: 'Failed to create withdrawal request: ' + error.message
     });
   }
 };
@@ -282,6 +263,9 @@ const updateWithdrawalStatus = async (req, res) => {
         message: `Cannot update withdrawal that is already ${withdrawal.status}` 
       });
     }
+
+    const sellerUser = await User.findById(withdrawal.seller);
+    if (!sellerUser) return res.status(404).json({ success: false, message: 'Seller not found' });
     
     // Update based on new status
     if (status === 'approved') {
@@ -289,6 +273,7 @@ const updateWithdrawalStatus = async (req, res) => {
       withdrawal.approvedAt = new Date();
       if (adminNote) withdrawal.adminNote = adminNote;
       if (transactionId) withdrawal.transactionId = transactionId;
+      // No balance change yet — stays in pendingWithdrawals until completed
     } 
     else if (status === 'completed') {
       if (withdrawal.status !== 'approved') {
@@ -301,12 +286,20 @@ const updateWithdrawalStatus = async (req, res) => {
       withdrawal.processedAt = new Date();
       if (transactionId) withdrawal.transactionId = transactionId;
       if (adminNote) withdrawal.adminNote = adminNote;
+
+      // Move from pending → totalWithdrawn
+      sellerUser.pendingWithdrawals = Math.max(0, (sellerUser.pendingWithdrawals || 0) - withdrawal.amount);
+      sellerUser.totalWithdrawn = (sellerUser.totalWithdrawn || 0) + withdrawal.amount;
     }
     else if (status === 'rejected') {
       withdrawal.status = 'rejected';
       withdrawal.rejectedAt = new Date();
       withdrawal.rejectionReason = rejectionReason || 'Request rejected by admin';
       if (adminNote) withdrawal.adminNote = adminNote;
+
+      // Refund the amount back to cashBox and remove from pending
+      sellerUser.pendingWithdrawals = Math.max(0, (sellerUser.pendingWithdrawals || 0) - withdrawal.amount);
+      sellerUser.cashBox = (sellerUser.cashBox || 0) + withdrawal.amount;
     }
     else {
       return res.status(400).json({ 
@@ -316,6 +309,7 @@ const updateWithdrawalStatus = async (req, res) => {
     }
     
     await withdrawal.save();
+    await sellerUser.save();
     await withdrawal.populate('seller', 'name email phoneNumber shopName');
     
     res.json({
@@ -327,8 +321,7 @@ const updateWithdrawalStatus = async (req, res) => {
     console.error('Update withdrawal status error:', error);
     res.status(500).json({ 
       success: false, 
-      message: 'Failed to update withdrawal status',
-      error: error.message 
+      message: 'Failed to update withdrawal status: ' + error.message
     });
   }
 };

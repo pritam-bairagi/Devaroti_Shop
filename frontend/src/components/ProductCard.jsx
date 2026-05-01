@@ -106,6 +106,7 @@ const ProductCard = ({ product, onAddToCart, onToggleFavorite }) => {
           src={product.image || 'https://via.placeholder.com/300'}
           alt={product.name}
           className="w-full h-64 object-contain p-4 group-hover:scale-105 transition-transform duration-300"
+          loading="lazy"
           onError={(e) => {
             e.target.src = 'https://via.placeholder.com/300';
           }}
@@ -201,22 +202,34 @@ const ProductCard = ({ product, onAddToCart, onToggleFavorite }) => {
           </button>
         </div>
 
-        {/* Stock Status */}
-        <div className="mt-2 flex items-center gap-2">
-          <div
-            className={`w-2 h-2 rounded-full ${
-              product.stock > 10
-                ? 'bg-green-500'
-                : product.stock > 0
-                ? 'bg-yellow-500'
-                : 'bg-red-500'
-            }`}
-          />
-          <span className="text-xs text-gray-500">
-            {product.stock > 0
-              ? `${product.stock} in stock`
-              : 'Out of stock'}
-          </span>
+        {/* Footer info */}
+        <div className="mt-2 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div
+              className={`w-2 h-2 rounded-full ${
+                product.stock > 10
+                  ? 'bg-green-500'
+                  : product.stock > 0
+                  ? 'bg-yellow-500'
+                  : 'bg-red-500'
+              }`}
+            />
+            <span className="text-xs text-gray-500">
+              {product.stock > 0
+                ? `${product.stock} in stock`
+                : 'Out of stock'}
+            </span>
+            {product.soldCount > 0 && (
+              <span className="text-xs font-bold text-orange-500 ml-2">
+                • {product.soldCount} Sold
+              </span>
+            )}
+          </div>
+          {product.createdAt && (
+            <span className="text-[10px] text-gray-400 capitalize">
+              Added: {new Date(product.createdAt).toLocaleDateString()}
+            </span>
+          )}
         </div>
       </div>
     </div>

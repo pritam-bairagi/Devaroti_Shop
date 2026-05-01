@@ -10,10 +10,13 @@ import {
   Code, Calculator as CalcIcon, MessageSquare, Headset, Megaphone,
   Image as ImageIcon, Layers, Menu, ChevronLeft, Bell, LogOut,
   Settings, MoreVertical, Send, Phone, Globe, Hash, Lock,
-  Shield, Database, Zap, Link, Tag, Package2, Star, Award
+  Shield, Database, Zap, Link, Tag, Package2, Star, Award, Camera
 } from "lucide-react";
 import { useAuth } from "../contexts/useAuth";
-import { adminAPI } from "../services/api";
+import { adminAPI, chatAPI, uploadAPI } from "../services/api";
+import { resizeImage } from "../utils/imageUtils";
+import ChatWindow from "../components/ChatWindow";
+import { useSocket } from "../contexts/useSocket";
 import toast from "react-hot-toast";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -236,10 +239,9 @@ const SearchBar = ({ value, onChange, placeholder = "Search..." }) => (
 // MAIN COMPONENT
 // ═════════════════════════════════════════════════════════════════════════════
 const AdminDashboard = () => {
-  const { user: currentUser } = useAuth();
-
-  // ── Sidebar ──────────────────────────────────────────────────────────────
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  console.log("AdminDashboard rendering...");
+  const { user: currentUser, logout } = useAuth();
+  const { socket, on, off } = useSocket();
   const [activeTab, setActiveTab] = useState("overview");
 
   // ── Core Data ─────────────────────────────────────────────────────────────
@@ -256,6 +258,8 @@ const AdminDashboard = () => {
   const [dateRange,    setDateRange]    = useState("30d");
   const [filterStatus, setFilterStatus] = useState("");
   const [searchQuery,  setSearchQuery]  = useState("");
+  const [sidebarOpen,  setSidebarOpen]  = useState(false);
+
 
   // ── Developer Section ─────────────────────────────────────────────────────
   const [categories,  setCategories]  = useState([]);
@@ -264,15 +268,23 @@ const AdminDashboard = () => {
   const [webhooks,    setWebhooks]    = useState([]);
   const [hotlines,    setHotlines]    = useState([]);
   const [marquee,     setMarquee]     = useState({ text: "", isActive: true });
+  const [headerHistory, setHeaderHistory] = useState([]);
+
 
   // ── Messenger ─────────────────────────────────────────────────────────────
   const [chats,        setChats]        = useState([]);
   const [selectedChat, setSelectedChat] = useState(null);
   const [newMessage,   setNewMessage]   = useState("");
+  const [userSearch, setUserSearch] = useState("");
+  const [userSearchResults, setUserSearchResults] = useState([]);
+  const [isSearchingUser, setIsSearchingUser] = useState(false);
   const chatEndRef = useRef(null);
 
   // ── Seller Requests ───────────────────────────────────────────────────────
   const [sellerRequests, setSellerRequests] = useState([]);
+  
+  // ── User Details View ─────────────────────────────────────────────────────
+
 
   // ── Modals ────────────────────────────────────────────────────────────────
   const [modals, setModals] = useState({
@@ -282,6 +294,7 @@ const AdminDashboard = () => {
     backup: false, coupon: false,
     addCategory: false, editCategory: false,
     addSlide: false, editSlide: false,
+    sellerChat: false, profile: false,
   });
   const [selectedItem, setSelectedItem] = useState(null);
 
@@ -322,49 +335,75 @@ const AdminDashboard = () => {
     try {
       const safe = (promise) => promise.catch(() => ({ data: {} }));
 
-      const [
-        statsRes, usersRes, productsRes, ordersRes, transRes,
-        withdrawRes, configRes, couponsRes, sellerReqRes,
-        chatsRes, analyticsRes, categoriesRes, slidesRes,
-        apiKeysRes, webhooksRes, hotlinesRes, marqueeRes
-      ] = await Promise.all([
-        safe(adminAPI.getStats({ period: dateRange })),
-        safe(adminAPI.getUsers({ limit: 200 })),
-        safe(adminAPI.getProducts({ limit: 500 })),
-        safe(adminAPI.getOrders({ limit: 200, status: filterStatus || undefined })),
-        safe(adminAPI.getTransactions({ limit: 200 })),
-        safe(adminAPI.getWithdrawals({ status: "all", limit: 200 })),
-        safe(adminAPI.getConfig()),
-        safe(adminAPI.getCoupons()),
-        safe(adminAPI.getSellerRequests?.({ limit: 100 }) ?? Promise.resolve({ data: {} })),
-        safe(adminAPI.getChats?.({ limit: 100 }) ?? Promise.resolve({ data: {} })),
-        activeTab === "analytics" ? safe(adminAPI.getAnalytics({ period: dateRange })) : Promise.resolve({ data: {} }),
-        safe(adminAPI.getCategories?.() ?? Promise.resolve({ data: {} })),
-        safe(adminAPI.getSlides?.() ?? Promise.resolve({ data: {} })),
-        safe(adminAPI.getApiKeys?.() ?? Promise.resolve({ data: {} })),
-        safe(adminAPI.getWebhooks?.() ?? Promise.resolve({ data: {} })),
-        safe(adminAPI.getHotlines?.() ?? Promise.resolve({ data: {} })),
-        safe(adminAPI.getMarquee?.() ?? Promise.resolve({ data: {} })),
-      ]);
+      // Common requirements for sidebar badges and basic stats
+      const reqs = {
+        stats: safe(adminAPI.getStats({ period: dateRange })),
+        sellerReqs: safe(adminAPI.getSellerRequests?.({ limit: 100 }) ?? Promise.resolve({ data: {} })),
+        chats: safe(chatAPI.getChats?.({ limit: 100 }) ?? Promise.resolve({ data: {} }))
+      };
 
-      if (statsRes?.data?.stats)          setStats(statsRes.data.stats);
-      if (usersRes?.data?.users)          setUsers(usersRes.data.users);
-      if (productsRes?.data?.products)    setProducts(productsRes.data.products);
-      if (ordersRes?.data?.orders)        setOrders(ordersRes.data.orders);
-      if (transRes?.data?.transactions)   setTransactions(transRes.data.transactions);
-      if (withdrawRes?.data?.withdrawals) setWithdrawals(withdrawRes.data.withdrawals);
-      if (configRes?.data?.configs)       setConfigs(configRes.data.configs);
-      if (couponsRes?.data?.coupons)      setCoupons(couponsRes.data.coupons);
-      if (sellerReqRes?.data?.sellerRequests) setSellerRequests(sellerReqRes.data.sellerRequests);
-      if (chatsRes?.data?.chats)          setChats(chatsRes.data.chats);
-      if (analyticsRes?.data?.analytics)  setAnalytics(analyticsRes.data.analytics);
-      if (categoriesRes?.data?.categories) setCategories(categoriesRes.data.categories);
-      if (slidesRes?.data?.slides)        setSlides(slidesRes.data.slides);
-      if (apiKeysRes?.data?.apiKeys)      setApiKeys(apiKeysRes.data.apiKeys);
-      if (webhooksRes?.data?.webhooks)    setWebhooks(webhooksRes.data.webhooks);
-      if (hotlinesRes?.data?.hotlines)    setHotlines(hotlinesRes.data.hotlines);
-      if (marqueeRes?.data?.marquee) {
-        const m = marqueeRes.data.marquee;
+      // Tab-specific requirements
+      if (activeTab === "users" || activeTab === "chats") {
+        reqs.users = safe(adminAPI.getUsers({ limit: 200 }));
+      } else if (activeTab === "inventory") {
+        reqs.products = safe(adminAPI.getProducts({ limit: 500 }));
+      } else if (activeTab === "orders" || activeTab === "payments") {
+        reqs.orders = safe(adminAPI.getOrders({ limit: 200, status: filterStatus || undefined }));
+      } else if (activeTab === "cashbox") {
+        reqs.transactions = safe(adminAPI.getTransactions({ limit: 200 }));
+      } else if (activeTab === "withdrawals" || activeTab === "payouts") {
+        reqs.withdrawals = safe(adminAPI.getWithdrawals({ status: "all", limit: 200 }));
+      } else if (activeTab === "analytics") {
+        reqs.analytics = safe(adminAPI.getAnalytics({ period: dateRange }));
+      } else if (activeTab === "settings") {
+        reqs.config = safe(adminAPI.getConfig());
+        reqs.coupons = safe(adminAPI.getCoupons());
+      } else if (activeTab === "developer") {
+        reqs.categories = safe(adminAPI.getCategories?.() ?? Promise.resolve({ data: {} }));
+        reqs.slides = safe(adminAPI.getSlides?.() ?? Promise.resolve({ data: {} }));
+        reqs.apiKeys = safe(adminAPI.getApiKeys?.() ?? Promise.resolve({ data: {} }));
+        reqs.webhooks = safe(adminAPI.getWebhooks?.() ?? Promise.resolve({ data: {} }));
+        reqs.hotlines = safe(adminAPI.getHotlines?.() ?? Promise.resolve({ data: {} }));
+        reqs.marquee = safe(adminAPI.getMarquee?.() ?? Promise.resolve({ data: {} }));
+        reqs.headerHistory = safe(adminAPI.getHeaderHistory?.() ?? Promise.resolve({ data: {} }));
+      } else if (activeTab === "overview") {
+        reqs.products = safe(adminAPI.getProducts({ limit: 10 }));
+        reqs.orders = safe(adminAPI.getOrders({ limit: 10 }));
+      }
+
+      const keys = Object.keys(reqs);
+      const results = await Promise.all(Object.values(reqs));
+      const res = {};
+      keys.forEach((key, i) => { res[key] = results[i].data; });
+
+      if (res.stats?.stats) setStats(res.stats.stats);
+      if (res.users?.users) setUsers(res.users.users);
+      if (res.products?.products) setProducts(res.products.products);
+      if (res.orders?.orders) setOrders(res.orders.orders);
+      if (res.transactions?.transactions) setTransactions(res.transactions.transactions);
+      if (res.withdrawals?.withdrawals) setWithdrawals(res.withdrawals.withdrawals);
+      if (res.config?.configs) setConfigs(res.config.configs);
+      if (res.coupons?.coupons) setCoupons(res.coupons.coupons);
+      if (res.sellerReqs?.users) setSellerRequests(res.sellerReqs.users);
+      else if (res.sellerReqs?.sellerRequests) setSellerRequests(res.sellerReqs.sellerRequests);
+      if (res.chats?.chats) {
+        setChats(res.chats.chats);
+        
+        // If we have a selected chat, refresh its data from the new list
+        if (selectedChat) {
+          const updated = res.chats.chats.find(c => c._id === selectedChat._id);
+          if (updated) setSelectedChat(updated);
+        }
+      }
+      if (res.analytics?.analytics) setAnalytics(res.analytics.analytics);
+      if (res.categories?.categories) setCategories(res.categories.categories);
+      if (res.slides?.slides) setSlides(res.slides.slides);
+      if (res.apiKeys?.apiKeys) setApiKeys(res.apiKeys.apiKeys);
+      if (res.webhooks?.webhooks) setWebhooks(res.webhooks.webhooks);
+      if (res.hotlines?.hotlines) setHotlines(res.hotlines.hotlines);
+      if (res.headerHistory?.history) setHeaderHistory(res.headerHistory.history);
+      if (res.marquee?.marquee) {
+        const m = res.marquee.marquee;
         setMarquee(m);
         setMarqueeForm({ text: m.text || "", isActive: m.isActive ?? true });
       }
@@ -376,10 +415,6 @@ const AdminDashboard = () => {
   }, [activeTab, dateRange, filterStatus]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
-
-  useEffect(() => {
-    if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: "smooth" });
-  }, [selectedChat]);
 
   // ── Export Utilities ──────────────────────────────────────────────────────
   const exportToExcel = (data, fileName) => {
@@ -416,7 +451,8 @@ const AdminDashboard = () => {
     } catch { toast.error("PDF export failed"); }
   };
 
-  // ── Computed ──────────────────────────────────────────────────────────────
+  // ── Computed & Filters ──────────────────────────────────────────────────
+
   const filteredOrders   = orders.filter(o => !searchQuery || o.orderNumber?.toLowerCase().includes(searchQuery.toLowerCase()) || o.user?.name?.toLowerCase().includes(searchQuery.toLowerCase()));
   const filteredUsers    = users.filter(u => !searchQuery || u.name?.toLowerCase().includes(searchQuery.toLowerCase()) || u.email?.toLowerCase().includes(searchQuery.toLowerCase()));
   const filteredProducts = products.filter(p => !searchQuery || p.name?.toLowerCase().includes(searchQuery.toLowerCase()));
@@ -425,9 +461,111 @@ const AdminDashboard = () => {
   const cashOut     = transactions.filter(t => t.type === "Cash Out").reduce((s, t) => s + (t.amount || 0), 0);
   const cashBalance = cashIn - cashOut;
 
+  const scrollToChatBottom = () => {
+
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  };
+
+  // Socket listeners for real-time chat
+  useEffect(() => {
+    if (!on || !socket) return;
+
+    const handleNewMessage = (data) => {
+      // Update the chats list (last message, unread count, etc.)
+      setChats(prev => {
+        const index = prev.findIndex(c => c._id === data.chatId);
+        if (index === -1) {
+          // If chat not in list, we might need to re-fetch or ignore
+          fetchData();
+          return prev;
+        }
+        const updated = [...prev];
+        const chat = { ...updated[index] };
+        chat.lastMessage = data.message.message;
+        chat.messages = [...(chat.messages || []), data.message];
+        chat.updatedAt = new Date();
+        // If not the selected chat, increment unread locally
+        if (!selectedChat || selectedChat._id !== data.chatId) {
+          chat.unreadCount = (chat.unreadCount || 0) + 1;
+        }
+        updated.splice(index, 1);
+        return [chat, ...updated];
+      });
+
+      // Update active chat window if it's the one receiving the message
+      if (selectedChat && selectedChat._id === data.chatId) {
+        setSelectedChat(prev => {
+           if (!prev) return prev;
+           if (prev.messages && prev.messages.some(m => m._id === data.message._id)) return prev;
+           return {
+             ...prev,
+             messages: [...(prev.messages || []), data.message]
+           };
+        });
+        setTimeout(scrollToChatBottom, 100);
+      }
+    };
+
+    on('new_message', handleNewMessage);
+    on('message_notification', (data) => {
+       // Optional: show a toast or highlight the sidebar
+       if (!selectedChat || selectedChat._id !== data.chatId) {
+         toast(`New message from ${data.senderName}`, { icon: '💬' });
+       }
+    });
+
+    return () => {
+      off('new_message', handleNewMessage);
+      off('message_notification');
+    };
+  }, [on, off, socket, selectedChat?._id]);
+
+
   // ═══════════════════════════════════════════════════════════════════════════
   // HANDLERS
   // ═══════════════════════════════════════════════════════════════════════════
+
+  const handleUserSearch = async (val) => {
+    setUserSearch(val);
+    if (!val.trim()) { setUserSearchResults([]); return; }
+    setIsSearchingUser(true);
+    try {
+      const res = await adminAPI.getUsers({ search: val, limit: 10 });
+      setUserSearchResults(res.data.users || []);
+    } catch {
+       // Silent error to prevent toast spam during typing
+    } finally {
+      setIsSearchingUser(false);
+    }
+  };
+
+  const startChatWithUser = async (user) => {
+    try {
+       const res = await chatAPI.getChatWithUser(user._id);
+       if (res.data.chat) {
+         setSelectedChat(res.data.chat);
+         if (!chats.find(c => c._id === res.data.chat._id)) {
+            setChats(prev => [res.data.chat, ...prev]);
+         }
+       } else {
+         // Start a new chat locally
+         setSelectedChat({
+           _id: null,
+           user: user,
+           seller: user, // Set as both fallback
+           messages: [],
+           participants: [currentUser.id || currentUser._id, user._id]
+         });
+       }
+       // If on mobile, might need different behavior, but for now just clear search
+       setUserSearch("");
+       setUserSearchResults([]);
+    } catch (err) {
+       toast.error("Failed to load chat with user");
+    }
+  };
 
   const handleUpdateOrder = async (e) => {
     e.preventDefault();
@@ -445,6 +583,15 @@ const AdminDashboard = () => {
       toast.success("Payment verified! Order is now visible to sellers.");
       fetchData();
     } catch (e) { toast.error(e?.response?.data?.message || "Failed to confirm payment"); }
+  };
+
+  const handleFailPayment = async (orderId) => {
+    if (!confirm("Are you sure you want to mark this payment as failed?")) return;
+    try {
+      await adminAPI.failOrderPayment(orderId);
+      toast.success("Payment marked as failed.");
+      fetchData();
+    } catch (e) { toast.error(e?.response?.data?.message || "Failed to mark payment as failed"); }
   };
 
   const handleAddTransaction = async (e) => {
@@ -556,12 +703,34 @@ const AdminDashboard = () => {
     } catch (error) { toast.error("Failed to save settings"); }
   };
 
+  const handleUpdateHeaderContent = async () => {
+    try {
+      await adminAPI.updateHeaderContent({ 
+        hotline: configs.header_hotline || "", 
+        notice: configs.header_notice || "" 
+      });
+      toast.success("Header content updated and history saved");
+      fetchData();
+    } catch {
+      toast.error("Failed to update header content");
+    }
+  };
+
   const handleSendReply = async () => {
     if (!newMessage.trim() || !selectedChat) return;
     try {
-      await adminAPI.replyToChat(selectedChat._id, { message: newMessage });
-      setNewMessage("");
-      fetchData();
+      const payload = selectedChat._id 
+        ? { chatId: selectedChat._id, message: newMessage }
+        : { receiverId: selectedChat.user?._id || selectedChat.seller?._id, message: newMessage };
+        
+      const res = await chatAPI.sendMessage(payload);
+      if (res.data.success) {
+        setNewMessage("");
+        if (res.data.chat) {
+          setSelectedChat(res.data.chat);
+        }
+        fetchData();
+      }
     } catch { toast.error("Failed to send reply"); }
   };
 
@@ -683,16 +852,16 @@ const AdminDashboard = () => {
 
         {/* Admin badge */}
         <div className="px-4 py-3 border-b border-slate-700/50">
-          <div className="flex items-center gap-2.5 bg-slate-800 rounded-xl p-2.5">
+          <button onClick={() => openModal("profile")} className="w-full flex items-center gap-2.5 bg-slate-800 rounded-xl p-2.5 hover:bg-slate-700 transition-colors">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-500 to-purple-700 flex items-center justify-center text-white text-xs font-bold">
               {currentUser?.name?.[0] || "A"}
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0 text-left">
               <p className="text-white text-xs font-semibold truncate">{currentUser?.name || "Admin"}</p>
               <p className="text-[10px] text-slate-400 truncate">{currentUser?.email || ""}</p>
             </div>
             <Badge status="admin" />
-          </div>
+          </button>
         </div>
 
         {/* Nav Items */}
@@ -897,7 +1066,7 @@ const AdminDashboard = () => {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-slate-700 bg-slate-900/60">
-              {["Order #","Customer","Items","Total","Payment","Status","Date","Actions"].map(h => <Th key={h}>{h}</Th>)}
+              {["Order #","Customer","Items","Total","Payment","Global Status","Seller Status","Date & Time","Actions"].map(h => <Th key={h}>{h}</Th>)}
             </tr>
           </thead>
           <tbody>
@@ -914,7 +1083,21 @@ const AdminDashboard = () => {
                   <Td><span className="font-bold text-white">{fmt(order.totalPrice)}</span></Td>
                   <Td><Badge status={order.paymentStatus} /></Td>
                   <Td><Badge status={order.status} /></Td>
-                  <Td className="text-slate-500 text-xs">{new Date(order.createdAt).toLocaleDateString()}</Td>
+                  <Td>
+                    <div className="flex flex-col gap-1">
+                      {order.sellers?.length > 0 ? order.sellers.map((s, si) => (
+                        <div key={si} className="flex items-center gap-1.5 whitespace-nowrap">
+                          <span className="text-[10px] text-slate-400 max-w-[70px] truncate" title={s.sellerId?.shopName || s.sellerId?.name || 'Seller'}>
+                            {s.sellerId?.shopName || s.sellerId?.name || 'Seller'}
+                          </span>
+                          <Badge status={s.status || order.status} />
+                        </div>
+                      )) : (
+                        <span className="text-slate-600 text-[10px]">—</span>
+                      )}
+                    </div>
+                  </Td>
+                  <Td className="text-slate-500 text-xs">{new Date(order.createdAt).toLocaleString()}</Td>
                   <Td>
                     <div className="flex items-center gap-1">
                       <Btn size="xs" variant="ghost" onClick={() => openModal("orderDetail", order)}><Eye size={12} /></Btn>
@@ -931,46 +1114,85 @@ const AdminDashboard = () => {
   );
 
   const renderPayments = () => {
-    const unverified = orders.filter(o => !o.adminConfirmedPayment);
+    const unverified = orders.filter(o => !o.adminConfirmedPayment && o.paymentStatus !== 'failed');
+    const paymentHistory = orders.filter(o => o.adminConfirmedPayment || o.paymentStatus === 'failed');
+
     return (
-      <div className="space-y-4">
-        <SectionHeader title="Payment Verification" />
-        <div className="bg-orange-500/10 border border-orange-500/20 rounded-xl p-4 flex items-start gap-3">
-          <Shield size={20} className="text-orange-400 mt-0.5 flex-shrink-0" />
-          <div>
-            <p className="text-orange-400 font-semibold text-sm">Security Protocol Active</p>
-            <p className="text-slate-400 text-xs mt-0.5">Sellers only see orders AFTER admin payment confirmation. Verify transaction IDs before approving.</p>
+      <div className="space-y-8">
+        <div className="space-y-4">
+          <SectionHeader title="Payment Verification" />
+          <div className="bg-orange-500/10 border border-orange-500/20 rounded-xl p-4 flex items-start gap-3">
+            <Shield size={20} className="text-orange-400 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="text-orange-400 font-semibold text-sm">Security Protocol Active</p>
+              <p className="text-slate-400 text-xs mt-0.5">Sellers only see orders AFTER admin payment confirmation. Verify transaction IDs before approving.</p>
+            </div>
           </div>
+          <TableWrapper>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-700 bg-slate-900/60">
+                  {["Order #","Customer","Method","Transaction ID","Amount","Payment Status","Date & Time","Action"].map(h => <Th key={h}>{h}</Th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {unverified.length === 0
+                  ? <EmptyRow cols={8} message="✓ All payments are verified" />
+                  : unverified.map(order => (
+                      <tr key={order._id} className="border-b border-slate-700/40 hover:bg-slate-700/25 transition-colors">
+                        <Td><span className="font-mono text-orange-400 text-xs font-bold">{order.orderNumber}</span></Td>
+                        <Td className="text-white">{order.user?.name}</Td>
+                        <Td><span className="uppercase text-xs font-bold text-slate-300 bg-slate-700 px-2 py-0.5 rounded">{order.paymentMethod}</span></Td>
+                        <Td><span className="font-mono text-cyan-400 font-bold text-xs">{order.paymentDetails?.transactionId || "—"}</span></Td>
+                        <Td><span className="font-bold text-white">{fmt(order.totalPrice)}</span></Td>
+                        <Td><Badge status={order.paymentStatus} /></Td>
+                        <Td className="text-slate-500 text-xs">{new Date(order.createdAt).toLocaleString()}</Td>
+                        <Td>
+                          <div className="flex items-center gap-2">
+                            <Btn size="sm" variant="success" onClick={() => handleConfirmPayment(order._id)}>
+                              <Check size={13} /> Verify
+                            </Btn>
+                            <Btn size="sm" variant="danger" onClick={() => handleFailPayment(order._id)}>
+                              <X size={13} /> Failed
+                            </Btn>
+                          </div>
+                        </Td>
+                      </tr>
+                    ))
+                }
+              </tbody>
+            </table>
+          </TableWrapper>
         </div>
-        <TableWrapper>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-700 bg-slate-900/60">
-                {["Order #","Customer","Method","Transaction ID","Amount","Payment Status","Action"].map(h => <Th key={h}>{h}</Th>)}
-              </tr>
-            </thead>
-            <tbody>
-              {unverified.length === 0
-                ? <EmptyRow cols={7} message="✓ All payments are verified" />
-                : unverified.map(order => (
-                    <tr key={order._id} className="border-b border-slate-700/40 hover:bg-slate-700/25 transition-colors">
-                      <Td><span className="font-mono text-orange-400 text-xs font-bold">{order.orderNumber}</span></Td>
-                      <Td className="text-white">{order.user?.name}</Td>
-                      <Td><span className="uppercase text-xs font-bold text-slate-300 bg-slate-700 px-2 py-0.5 rounded">{order.paymentMethod}</span></Td>
-                      <Td><span className="font-mono text-cyan-400 font-bold text-xs">{order.paymentDetails?.txnId || "—"}</span></Td>
-                      <Td><span className="font-bold text-white">{fmt(order.totalPrice)}</span></Td>
-                      <Td><Badge status={order.paymentStatus} /></Td>
-                      <Td>
-                        <Btn size="sm" variant="success" onClick={() => handleConfirmPayment(order._id)}>
-                          <Check size={13} /> Verify & Confirm
-                        </Btn>
-                      </Td>
-                    </tr>
-                  ))
-              }
-            </tbody>
-          </table>
-        </TableWrapper>
+
+        <div className="space-y-4">
+          <SectionHeader title="Payment History" />
+          <TableWrapper>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-700 bg-slate-900/60">
+                  {["Order #","Customer","Method","Transaction ID","Amount","Payment Status","Date & Time"].map(h => <Th key={h}>{h}</Th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {paymentHistory.length === 0
+                  ? <EmptyRow cols={7} message="No payment history found" />
+                  : paymentHistory.map(order => (
+                      <tr key={order._id} className="border-b border-slate-700/40 hover:bg-slate-700/25 transition-colors">
+                        <Td><span className="font-mono text-orange-400 text-xs font-bold">{order.orderNumber}</span></Td>
+                        <Td className="text-white">{order.user?.name}</Td>
+                        <Td><span className="uppercase text-xs font-bold text-slate-300 bg-slate-700 px-2 py-0.5 rounded">{order.paymentMethod}</span></Td>
+                        <Td><span className="font-mono text-cyan-400 font-bold text-xs">{order.paymentDetails?.transactionId || "—"}</span></Td>
+                        <Td><span className="font-bold text-white">{fmt(order.totalPrice)}</span></Td>
+                        <Td><Badge status={order.paymentStatus} /></Td>
+                        <Td className="text-slate-500 text-xs">{new Date(order.createdAt).toLocaleString()}</Td>
+                      </tr>
+                    ))
+                }
+              </tbody>
+            </table>
+          </TableWrapper>
+        </div>
       </div>
     );
   };
@@ -1150,90 +1372,132 @@ const AdminDashboard = () => {
 
   const renderChats = () => (
     <div className="space-y-4">
-      <SectionHeader title="Customer Messenger" />
+      <SectionHeader title="Global Messenger" />
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4" style={{ height: "calc(100vh - 220px)", minHeight: 500 }}>
         {/* Chat List */}
-        <div className="lg:col-span-1 bg-slate-800 border border-slate-700 rounded-xl overflow-hidden flex flex-col">
-          <div className="p-3 border-b border-slate-700 bg-slate-900/50">
+        <div className="lg:col-span-1 bg-slate-800 border border-slate-700 rounded-xl flex flex-col relative">
+          <div className="p-3 border-b border-slate-700 bg-slate-900/50 flex flex-col gap-3">
             <p className="text-sm font-semibold text-white">Conversations <span className="text-slate-500 font-normal">({chats.length})</span></p>
+            {/* Search Input */}
+            <div className="relative z-50">
+              <div className="relative">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                <input
+                  type="text"
+                  placeholder="Search users to chat (name or email)..."
+                  value={userSearch}
+                  onChange={(e) => handleUserSearch(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-orange-500 transition-colors"
+                />
+                {isSearchingUser && <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-orange-500 animate-spin" />}
+              </div>
+              {/* Search Results Dropdown */}
+              {userSearch.trim() && (
+                <div className="absolute top-full left-0 w-full mt-1 bg-slate-800 border border-slate-700 rounded-lg shadow-2xl overflow-hidden max-h-80 overflow-y-auto z-[100]">
+                  {isSearchingUser ? (
+                    <div className="p-4 text-center text-slate-500 text-sm flex items-center justify-center gap-2">
+                      <Loader2 size={16} className="animate-spin text-orange-500" /> Searching...
+                    </div>
+                  ) : userSearchResults.length > 0 ? (
+                    userSearchResults.map(u => (
+                      <button
+                        key={u._id}
+                        className="w-full text-left p-3 hover:bg-slate-700 border-b border-slate-700 last:border-0 transition-colors flex items-center gap-3"
+                        onClick={() => startChatWithUser(u)}
+                      >
+                        <img 
+                          src={u.profilePic || `https://ui-avatars.com/api/?name=${encodeURIComponent(u.name || "U")}&background=1e293b&color=ff5500`}
+                          className="w-9 h-9 rounded-full object-cover border border-slate-600" 
+                          alt="" 
+                        />
+                        <div className="min-w-0">
+                          <p className="text-sm text-white font-semibold truncate">{u.shopName || u.name}</p>
+                          <p className="text-[11px] text-slate-400 truncate">{u.email} <span className="text-[10px] opacity-60">({u.role})</span></p>
+                        </div>
+                      </button>
+                    ))
+                  ) : (
+                    <div className="p-4 text-center text-sm text-slate-500 bg-slate-900/50">
+                      No users found for "{userSearch}"
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            
+            {/* Horizontal User List (Small Icons) */}
+            <div className="px-1 py-1 flex gap-2 overflow-x-auto no-scrollbar">
+              {users.slice(0, 20).map(u => (
+                <button 
+                  key={u._id} 
+                  title={u.shopName || u.name}
+                  onClick={() => startChatWithUser(u)}
+                  className="flex-shrink-0 relative group"
+                >
+                  <img 
+                    src={u.profilePic || `https://ui-avatars.com/api/?name=${encodeURIComponent(u.name || "U")}&background=1e293b&color=ff5500`}
+                    className="w-10 h-10 rounded-full object-cover border-2 border-slate-700 group-hover:border-orange-500 transition-all" 
+                    alt={u.name} 
+                  />
+                  <div className={`absolute -bottom-1 -right-1 w-3 h-3 border-2 border-slate-800 rounded-full ${u.role === 'seller' ? 'bg-emerald-500' : 'bg-blue-500'}`} />
+                </button>
+              ))}
+            </div>
           </div>
           <div className="overflow-y-auto flex-1 divide-y divide-slate-700/50">
-            {chats.length === 0
-              ? <div className="p-8 text-center text-slate-500 text-sm">No messages yet</div>
-              : chats.map(chat => (
-                  <button
-                    key={chat._id}
-                    className={`w-full p-3 hover:bg-slate-700/40 transition-colors text-left ${selectedChat?._id === chat._id ? "bg-orange-500/10 border-l-2 border-orange-500" : ""}`}
-                    onClick={() => setSelectedChat(chat)}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-start gap-2.5 min-w-0">
-                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-slate-600 to-slate-700 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-                          {chat.user?.name?.[0] || "?"}
+              {chats.length === 0
+                ? <div className="p-8 text-center text-slate-500 text-sm">No messages yet</div>
+                : chats.map(chat => {
+                    const otherUser = chat.seller?._id !== currentUser.id ? chat.seller : chat.user;
+                    return (
+                      <button
+                        key={chat._id}
+                        className={`w-full p-3 hover:bg-slate-700/40 transition-colors text-left ${selectedChat?._id === chat._id ? "bg-orange-500/10 border-l-2 border-orange-500" : ""}`}
+                        onClick={() => setSelectedChat(chat)}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-start gap-2.5 min-w-0">
+                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-slate-600 to-slate-700 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 overflow-hidden">
+                              {otherUser?.profilePic ? (
+                                <img src={otherUser.profilePic} className="w-full h-full object-cover" alt="" />
+                              ) : (
+                                <span>{otherUser?.name?.[0] || "?"}</span>
+                              )}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-white text-sm font-medium truncate">{otherUser?.shopName || otherUser?.name || "Anonymous"}</p>
+                              <p className="text-xs text-slate-500 truncate">{chat.lastMessage || chat.messages?.[chat.messages.length - 1]?.message || "…"}</p>
+                            </div>
+                          </div>
+                          {(chat.unreadCount > 0) && (
+                            <span className="bg-orange-500 text-white text-[10px] rounded-full w-5 h-5 flex items-center justify-center flex-shrink-0">{chat.unreadCount}</span>
+                          )}
                         </div>
-                        <div className="min-w-0">
-                          <p className="text-white text-sm font-medium truncate">{chat.user?.name || "Anonymous"}</p>
-                          <p className="text-xs text-slate-500 truncate">{chat.lastMessage || chat.messages?.[chat.messages.length - 1]?.message || "…"}</p>
-                        </div>
-                      </div>
-                      {(chat.unreadCount > 0) && (
-                        <span className="bg-orange-500 text-white text-[10px] rounded-full w-5 h-5 flex items-center justify-center flex-shrink-0">{chat.unreadCount}</span>
-                      )}
-                    </div>
-                    <p className="text-[10px] text-slate-600 mt-1.5 ml-10">{new Date(chat.updatedAt || chat.createdAt).toLocaleString()}</p>
-                  </button>
-                ))
-            }
+                        <p className="text-[10px] text-slate-600 mt-1.5 ml-10">{new Date(chat.updatedAt || chat.createdAt).toLocaleString()}</p>
+                      </button>
+                    );
+                  })
+              }
           </div>
         </div>
 
-        {/* Chat Window */}
-        <div className="lg:col-span-2 bg-slate-800 border border-slate-700 rounded-xl overflow-hidden flex flex-col">
-          {selectedChat ? (
-            <>
-              <div className="p-3.5 border-b border-slate-700 bg-slate-900/50 flex items-center gap-3">
-                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-orange-500/30 to-orange-600/30 border border-orange-500/30 flex items-center justify-center text-orange-400 font-bold">
-                  {selectedChat.user?.name?.[0] || "?"}
-                </div>
-                <div>
-                  <p className="text-white font-semibold text-sm">{selectedChat.user?.name || "Anonymous"}</p>
-                  <p className="text-xs text-slate-500">{selectedChat.user?.email}</p>
-                </div>
-              </div>
-              <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                {(selectedChat.messages || []).map((msg, idx) => (
-                  <div key={idx} className={`flex ${msg.sender === "admin" ? "justify-end" : "justify-start"}`}>
-                    <div className={`max-w-[75%] rounded-2xl px-4 py-2.5 ${msg.sender === "admin" ? "bg-orange-500 text-white rounded-br-sm" : "bg-slate-700 text-slate-200 rounded-bl-sm"}`}>
-                      <p className="text-sm leading-relaxed">{msg.message}</p>
-                      <p className="text-[10px] opacity-60 mt-1">{new Date(msg.createdAt).toLocaleTimeString()}</p>
-                    </div>
+            <div className="flex-1 min-w-0 bg-slate-900 border-l border-slate-700 relative overflow-hidden flex flex-col">
+              {selectedChat ? (
+                <ChatWindow 
+                  chatId={selectedChat._id} 
+                  receiver={selectedChat.seller?._id !== (currentUser.id || currentUser._id) ? selectedChat.seller : selectedChat.user}
+                  onClose={() => setSelectedChat(null)}
+                />
+              ) : (
+                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-slate-900/50">
+                  <div className="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center mb-6 text-slate-600 shadow-inner">
+                    <MessageSquare size={32} />
                   </div>
-                ))}
-                <div ref={chatEndRef} />
-              </div>
-              <div className="p-3 border-t border-slate-700 bg-slate-900/30">
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={newMessage}
-                    onChange={e => setNewMessage(e.target.value)}
-                    onKeyPress={e => e.key === "Enter" && handleSendReply()}
-                    placeholder="Type your reply…"
-                    className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white text-sm placeholder-slate-500 focus:outline-none focus:border-orange-500 transition-colors"
-                  />
-                  <Btn onClick={handleSendReply} disabled={!newMessage.trim()}>
-                    <Send size={14} /> Send
-                  </Btn>
+                  <h3 className="text-white font-bold text-lg mb-2">Global Messenger</h3>
+                  <p className="text-slate-500 text-sm max-w-xs">Select a user from the left or utilize the search bar to start a new conversation.</p>
                 </div>
-              </div>
-            </>
-          ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-slate-500 gap-3">
-              <MessageSquare size={36} className="opacity-30" />
-              <p className="text-sm">Select a conversation to reply</p>
+              )}
             </div>
-          )}
-        </div>
       </div>
     </div>
   );
@@ -1269,6 +1533,9 @@ const AdminDashboard = () => {
                       <div className="flex gap-1.5">
                         <Btn size="sm" variant="success" onClick={() => handleApproveSeller(r.userId || r._id, true)}><Check size={13} /> Approve</Btn>
                         <Btn size="sm" variant="danger"  onClick={() => handleApproveSeller(r.userId || r._id, false)}><X size={13} /> Reject</Btn>
+                        <Btn size="sm" variant="secondary" onClick={() => { setSelectedItem(r); openModal("sellerChat"); }}>
+                          <MessageSquare size={13} /> Chat
+                        </Btn>
                       </div>
                     </Td>
                   </tr>
@@ -1445,11 +1712,12 @@ const AdminDashboard = () => {
       {/* Fees */}
       <div className="bg-slate-800 border border-slate-700 rounded-xl p-5">
         <p className="text-xs font-bold text-orange-400 uppercase tracking-widest mb-4">Fees & Delivery</p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <Input label="Delivery Charge (৳)" type="number" value={configs.delivery_charge || ""} onChange={e => setConfigs(c => ({ ...c, delivery_charge: e.target.value }))} placeholder="60" />
           <Input label="VAT / Tax (%)"       type="number" value={configs.vat_percentage  || ""} onChange={e => setConfigs(c => ({ ...c, vat_percentage:  e.target.value }))} placeholder="5" />
+          <Input label="Platform Commission (%)" type="number" value={configs.platform_commission_rate || ""} onChange={e => setConfigs(c => ({ ...c, platform_commission_rate: e.target.value }))} placeholder="2" />
         </div>
-        <Btn className="mt-4" onClick={() => handleSaveAllConfigs(["delivery_charge","vat_percentage"])}>Save Fees</Btn>
+        <Btn className="mt-4" onClick={() => handleSaveAllConfigs(["delivery_charge","vat_percentage","platform_commission_rate"])}>Save Fees</Btn>
       </div>
       {/* Membership */}
       <div className="bg-slate-800 border border-slate-700 rounded-xl p-5">
@@ -1559,72 +1827,63 @@ const AdminDashboard = () => {
         }
       </div>
 
-      {/* Hotlines */}
+      {/* Hotlines & Marquee Settings */}
       <div className="bg-slate-800 border border-slate-700 rounded-xl p-5">
-        <p className="text-sm font-bold text-white flex items-center gap-2 mb-4"><Headset size={16} className="text-orange-500" /> Hotline Numbers</p>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          <div>
-            <p className="text-xs text-slate-500 uppercase font-semibold mb-3">Active Hotlines</p>
-            {hotlines.length === 0
-              ? <p className="text-slate-500 text-sm py-3 text-center">No hotlines configured</p>
-              : <div className="space-y-2">
-                  {hotlines.map(h => (
-                    <div key={h._id} className="flex items-center justify-between bg-slate-900 border border-slate-700 rounded-xl p-3">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-lg bg-green-500/10 flex items-center justify-center"><Phone size={14} className="text-green-400" /></div>
-                        <div>
-                          <p className="text-white text-sm font-medium">{h.number}</p>
-                          {h.label && <p className="text-xs text-slate-500">{h.label}</p>}
-                        </div>
-                      </div>
-                      <Btn size="xs" variant="danger" onClick={() => handleDeleteHotline(h._id)}><Trash2 size={12} /></Btn>
-                    </div>
-                  ))}
-                </div>
-            }
-          </div>
-          <div className="bg-slate-900/60 border border-slate-700 rounded-xl p-4 space-y-3">
-            <p className="text-xs text-slate-400 font-semibold uppercase">Add New Hotline</p>
-            <Input label="Phone Number" value={hotlineForm.number} onChange={e => setHotlineForm(f => ({ ...f, number: e.target.value }))} placeholder="+8801XXXXXXXXX" />
-            <Btn className="w-full" onClick={handleAddHotline}><Plus size={12} /> Add Hotline</Btn>
-          </div>
-        </div>
-      </div>
-
-      {/* Marquee */}
-      <div className="bg-slate-800 border border-slate-700 rounded-xl p-5">
-        <p className="text-sm font-bold text-white flex items-center gap-2 mb-4"><Megaphone size={16} className="text-orange-500" /> Notice Marquee</p>
+        <p className="text-sm font-bold text-white flex items-center gap-2 mb-4"><Megaphone size={16} className="text-orange-500" /> Header Content (Notice & Hotline)</p>
         <div className="space-y-4">
-          <TextArea label="Announcement Text" value={marqueeForm.text} onChange={e => setMarqueeForm(f => ({ ...f, text: e.target.value }))} placeholder="Enter your announcement…" rows={3} />
-          <div className="flex items-center justify-between">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={marqueeForm.isActive} onChange={e => setMarqueeForm(f => ({ ...f, isActive: e.target.checked }))} className="w-4 h-4 rounded border-slate-600 bg-slate-900 accent-orange-500" />
-              <span className="text-sm text-slate-300">Show on website</span>
-            </label>
-            <Btn onClick={handleUpdateMarquee}>Update Marquee</Btn>
-          </div>
-          {marqueeForm.text && (
-            <div className="bg-orange-500/10 border border-orange-500/20 rounded-xl px-4 py-2.5 overflow-hidden">
-              <p className="text-[10px] text-orange-400/60 mb-1 uppercase font-bold">Preview</p>
-              <div className="overflow-hidden">
-                <p className="text-orange-400 text-sm whitespace-nowrap animate-pulse">{marqueeForm.text}</p>
+          <Input label="Header Hotline Number" value={configs.header_hotline || ""} onChange={e => setConfigs(c => ({ ...c, header_hotline: e.target.value }))} placeholder="+8801XXXXXXXXX" />
+          <TextArea label="Header Notice (Marquee)" value={configs.header_notice || ""} onChange={e => setConfigs(c => ({ ...c, header_notice: e.target.value }))} placeholder="Enter notice text/HTML..." rows={3} />
+          
+          <Btn onClick={handleUpdateHeaderContent}>Save Header Content</Btn>
+
+          {(configs.header_notice || configs.header_hotline) && (
+            <div className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 mt-4">
+              <p className="text-xs text-slate-500 uppercase font-bold mb-2">Preview</p>
+              <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
+                <Headset size={16} className="text-slate-400" />
+                <span className="text-white">{configs.header_hotline}</span>
               </div>
+              {configs.header_notice && (
+                <div className="bg-orange-500/10 border border-orange-500/20 rounded-lg p-2 overflow-hidden relative h-8 flex items-center">
+                  <div 
+                    className="absolute whitespace-nowrap animate-marquee uppercase text-red-400 text-sm"
+                    dangerouslySetInnerHTML={{ __html: configs.header_notice }}
+                  />
+                </div>
+              )}
             </div>
           )}
+          
+          <div className="mt-8">
+            <p className="text-xs text-slate-400 uppercase font-bold mb-3 flex items-center gap-1.5"><History size={14} /> Notice History</p>
+            <TableWrapper>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-700 bg-slate-900/60">
+                    <Th>Date</Th>
+                    <Th>Admin</Th>
+                    <Th>Hotline</Th>
+                    <Th>Notice</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {headerHistory && headerHistory.length > 0 ? (
+                    headerHistory.map((h, i) => (
+                      <tr key={h._id || i} className="border-b border-slate-700/40 hover:bg-slate-700/25 transition-colors">
+                        <Td className="whitespace-nowrap text-xs text-slate-400">{new Date(h.createdAt).toLocaleString()}</Td>
+                        <Td className="text-slate-300 font-medium">{h.updatedBy?.name || "System"}</Td>
+                        <Td className="text-slate-300">{h.hotline || "—"}</Td>
+                        <Td className="text-slate-400 text-xs max-w-xs truncate">{h.notice || "—"}</Td>
+                      </tr>
+                    ))
+                  ) : (
+                    <EmptyRow cols={4} message="No history found" />
+                  )}
+                </tbody>
+              </table>
+            </TableWrapper>
+          </div>
         </div>
-
-                <p className="text-sm font-bold text-green-500 flex items-center gap-2 mb-4">Notice History</p>
-      <table>
-        <thead>
-          <tr className="border-b border-slate-700 bg-slate-900/60 w-100">
-            {["Announcement","Status","Date","Action"].map(h => <Th key={h}>{h}</Th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {/* Render notice history rows here */}
-        </tbody>
-      </table>
-
       </div>
     </div>
   );
@@ -1706,6 +1965,36 @@ const AdminDashboard = () => {
                 </div>
               ))}
             </div>
+            <div className="bg-slate-900 rounded-xl p-3 border border-orange-500/20">
+               <p className="text-xs text-orange-400 uppercase font-bold mb-3 flex items-center gap-2">
+                 <Store size={14} /> Seller Action Requests / Progress
+               </p>
+               <div className="space-y-3">
+                 {selectedItem.sellers?.length > 0 ? selectedItem.sellers.map((s, i) => (
+                   <div key={i} className="flex items-center justify-between p-2 bg-slate-800/50 rounded-lg border border-slate-700">
+                     <div>
+                       <p className="text-white text-xs font-bold">
+                         {s.sellerId?.shopName || s.sellerId?.name || 'Unknown Seller'}
+                       </p>
+                       <p className="text-[10px] text-slate-500">{s.sellerId?.email || '—'}</p>
+                       <p className="text-[10px] text-slate-600">
+                         Items: {s.items?.length ?? 0} &nbsp;·&nbsp; Subtotal: ৳{(s.subtotal || 0).toLocaleString()}
+                       </p>
+                     </div>
+                     <div className="flex flex-col items-end gap-1">
+                       {/* Seller-level status falls back to global order status */}
+                       <Badge status={s.status || selectedItem.status} />
+                       {s.trackingNumber && <span className="text-[9px] font-mono text-cyan-400">TRK: {s.trackingNumber}</span>}
+                       <span className={`text-[9px] font-semibold ${s.isPaid ? 'text-emerald-400' : 'text-yellow-400'}`}>
+                         {s.isPaid ? '✓ Paid' : 'Awaiting'}
+                       </span>
+                     </div>
+                   </div>
+                 )) : (
+                   <p className="text-slate-600 text-xs text-center py-2">No seller breakdown available</p>
+                 )}
+               </div>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
               <div className="bg-slate-900 rounded-xl p-3 space-y-1.5">
                 {[["Subtotal", fmt(selectedItem.subtotal)], ["Shipping", fmt(selectedItem.shippingCost)], ["VAT", fmt(selectedItem.vatAmount)], ["Discount", `-${fmt(selectedItem.discount)}`]].map(([k, v]) => (
@@ -1713,11 +2002,22 @@ const AdminDashboard = () => {
                 ))}
                 <div className="flex justify-between border-t border-slate-800 pt-1.5"><span className="text-white font-bold">Total</span><span className="text-orange-400 font-bold">{fmt(selectedItem.totalPrice)}</span></div>
               </div>
-              <div className="bg-slate-900 rounded-xl p-3 space-y-1.5">
-                <div className="flex justify-between"><span className="text-slate-500">Method</span><span className="text-white">{selectedItem.paymentMethod}</span></div>
-                <div className="flex justify-between"><span className="text-slate-500">Payment</span><Badge status={selectedItem.paymentStatus} /></div>
-                <div className="flex justify-between"><span className="text-slate-500">Status</span><Badge status={selectedItem.status} /></div>
-                {selectedItem.trackingNumber && <div className="flex justify-between"><span className="text-slate-500">Tracking</span><span className="text-blue-400 text-xs font-mono">{selectedItem.trackingNumber}</span></div>}
+              <div className="bg-slate-900 rounded-xl p-3 space-y-2">
+                <div className="flex justify-between items-center"><span className="text-slate-500 text-xs uppercase tracking-wider">Method</span><span className="text-white font-bold uppercase text-xs">{selectedItem.paymentMethod}</span></div>
+                <div className="flex justify-between items-center"><span className="text-slate-500 text-xs uppercase tracking-wider">Payment</span><Badge status={selectedItem.paymentStatus} /></div>
+                <div className="flex justify-between items-center"><span className="text-slate-500 text-xs uppercase tracking-wider">Status</span><Badge status={selectedItem.status} /></div>
+                {selectedItem.paymentDetails?.transactionId && (
+                  <div className="flex justify-between items-center pt-1 border-t border-slate-800">
+                    <span className="text-slate-500 text-[10px] uppercase font-bold">Transaction ID</span>
+                    <span className="text-cyan-400 text-[10px] font-mono select-all bg-cyan-400/10 px-1.5 py-0.5 rounded">{selectedItem.paymentDetails.transactionId}</span>
+                  </div>
+                )}
+                {selectedItem.trackingNumber && (
+                   <div className="flex justify-between items-center pt-1 border-t border-slate-800">
+                     <span className="text-slate-500 text-[10px] uppercase font-bold">Tracking</span>
+                     <span className="text-blue-400 text-[10px] font-mono select-all bg-blue-400/10 px-1.5 py-0.5 rounded">{selectedItem.trackingNumber}</span>
+                   </div>
+                )}
               </div>
             </div>
           </div>
@@ -1801,6 +2101,55 @@ const AdminDashboard = () => {
           </form>
         </Modal>
       ))}
+
+      {/* Profile Modal */}
+      <Modal open={modals.profile} onClose={() => closeModal("profile")} title="Admin Profile" size="sm">
+        <div className="text-center">
+            <div className="relative inline-block mb-4 group">
+              <img 
+                src={currentUser?.profilePic || `https://ui-avatars.com/api/?name=${encodeURIComponent(currentUser?.name || "A")}&background=orange&color=white`}
+                className="w-24 h-24 rounded-full object-cover border-4 border-slate-700 shadow-xl group-hover:border-orange-500 transition-all"
+                alt="" 
+              />
+              <label className="absolute bottom-0 right-0 p-2 bg-orange-500 rounded-full cursor-pointer hover:bg-orange-600 transition-all shadow-lg active:scale-90">
+                  <Camera size={14} className="text-white" />
+                  <input type="file" className="hidden" accept="image/*" onChange={async (e) => {
+                    const file = e.target.files[0];
+                    if (!file) return;
+                    const loadingToast = toast.loading('Uploading profile...');
+                    try {
+                      const resized = await resizeImage(file, { maxSizeKB: 512, maxWidth: 512, maxHeight: 512 });
+                      const fd = new FormData();
+                      fd.append('images', resized);
+                      const res = await uploadAPI.uploadImages(fd);
+                      if (res.data.success) {
+                          const newPic = res.data.urls[0];
+                          await adminAPI.updateProfile({ profilePic: newPic });
+                          toast.success('Done! Refreshing...', { id: loadingToast });
+                          window.location.reload();
+                      }
+                    } catch (err) {
+                      toast.error('Upload failed', { id: loadingToast });
+                    }
+                  }} />
+              </label>
+            </div>
+            <p className="text-white font-bold text-lg">{currentUser?.name}</p>
+            <p className="text-slate-400 text-sm mb-4">{currentUser?.email}</p>
+            <div className="flex justify-center gap-2 mb-2">
+              <Badge status="admin" />
+              <Badge status="active" />
+            </div>
+            <div className="p-3 bg-slate-900 rounded-xl text-left space-y-2 mt-4">
+              <p className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">Permissions</p>
+              <div className="flex flex-wrap gap-1">
+                  {["Orders", "Users", "Payments", "System"].map(p => (
+                    <span key={p} className="px-2 py-0.5 bg-orange-500/10 text-orange-400 text-[10px] rounded border border-orange-500/20">{p}</span>
+                  ))}
+              </div>
+            </div>
+        </div>
+      </Modal>
 
       {/* View User Details */}
       <Modal open={modals.viewUserDetails} onClose={() => closeModal("viewUserDetails")} title={`User Details: ${viewingUser?.name}`} size="lg">
@@ -2022,6 +2371,15 @@ const AdminDashboard = () => {
             <CloudUpload size={14} /> Upload Backup to Drive
           </Btn>
           <p className="text-xs text-slate-600 text-center">Requires GOOGLE_CLIENT_ID in .env + googleapis package</p>
+        </div>
+      </Modal>
+      {/* Seller Chat Modal */}
+      <Modal open={modals.sellerChat} onClose={() => closeModal("sellerChat")} title={`Chat with ${selectedItem?.name || "Seller"}`} size="lg">
+        <div style={{ height: "500px" }}>
+          <ChatWindow 
+            receiver={selectedItem} 
+            onClose={() => closeModal("sellerChat")} 
+          />
         </div>
       </Modal>
     </div>

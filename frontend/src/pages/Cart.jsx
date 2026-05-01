@@ -34,7 +34,7 @@ const Cart = () => {
     phoneNumber: ''
   });
 
-  const [paymentMethod, setPaymentMethod] = useState('Cash on Delivery');
+  const [paymentMethod, setPaymentMethod] = useState('');
   const [transactionId, setTransactionId] = useState('');
   const [useSavedAddress, setUseSavedAddress] = useState(true);
   const [userAddresses, setUserAddresses] = useState([]);
@@ -90,13 +90,10 @@ const Cart = () => {
 
     const fetchConfigs = async () => {
       try {
-        const keys = Object.keys(configs);
-        const newConfigs = { ...configs };
-        await Promise.all(keys.map(async (key) => {
-          const res = await orderAPI.getPublicConfig(key).catch(() => ({ data: { value: null } }));
-          if (res.data.value !== null && res.data.value !== undefined) newConfigs[key] = res.data.value;
-        }));
-        setConfigs(newConfigs);
+        const res = await orderAPI.getPublicConfigs();
+        if (res.data.success) {
+          setConfigs(prev => ({ ...prev, ...res.data.configs }));
+        }
       } catch (err) { console.error("Config load error", err); }
     };
     fetchConfigs();
@@ -109,8 +106,11 @@ const Cart = () => {
   const getUniqueSellers = () => {
     const sellers = new Map();
     selectedCartItems.forEach(item => {
-      const sellerId = item.product.user?._id || item.product.user;
-      const sellerName = item.product.user?.shopName || item.product.user?.name || 'Store';
+      // Robust seller identification
+      const sellerData = item.product.user;
+      const sellerId = sellerData?._id || (typeof sellerData === 'string' ? sellerData : 'official');
+      const sellerName = sellerData?.shopName || sellerData?.name || 'Devaroti Official';
+
       if (!sellers.has(sellerId)) {
         sellers.set(sellerId, {
           id: sellerId,
@@ -120,8 +120,9 @@ const Cart = () => {
         });
       }
       const seller = sellers.get(sellerId);
+      const price = item.price || item.product.sellingPrice;
       seller.items.push(item);
-      seller.subtotal += item.product.sellingPrice * item.quantity;
+      seller.subtotal += price * item.quantity;
     });
     return sellers;
   };
@@ -130,7 +131,7 @@ const Cart = () => {
   const uniqueSellersCount = uniqueSellers.size;
 
   // Calculate subtotal
-  const calculateSubtotal = () => selectedCartItems.reduce((sum, item) => sum + (item.product.sellingPrice * item.quantity), 0);
+  const calculateSubtotal = () => selectedCartItems.reduce((sum, item) => sum + ((item.price || item.product.sellingPrice) * item.quantity), 0);
 
   // Calculate VAT
   const calculateVAT = () => calculateSubtotal() * (Number(configs.vat_percentage) / 100);
@@ -173,31 +174,47 @@ const Cart = () => {
     const vat = calculateVAT();
     const shipping = calculateShipping() - deliveryDiscountAmount;
     const totalDiscount = (discount || 0) + membershipDiscountAmount;
-    return Math.max(0, subtotal + vat + shipping - totalDiscount);
+    return Math.round(Math.max(0, subtotal + vat + shipping - totalDiscount));
   };
 
-  const updateQuantity = async (productId, q) => {
-    if (q < 1) return;
-    setUpdatingId(productId);
+  const handleChatWithSeller = async (sellerId) => {
     try {
-      const res = await userAPI.updateCartItem(productId, { quantity: q });
+      if (!user) return navigate('/login');
+      // Navigate to dashboard and trigger chat modal via state if possible, 
+      // or use the existing ChatWindow if it's reachable.
+      // For now, redirecting to dashboard which handles conversations.
+      navigate(`/dashboard?tab=messages&chatWith=${sellerId}`);
+    } catch (err) {
+      toast.error('Failed to open chat');
+    }
+  };
+
+  const updateQuantity = async (cartItemId, q) => {
+    if (q < 1) return;
+    setUpdatingId(cartItemId);
+    try {
+      const res = await userAPI.updateCartItem(cartItemId, { quantity: q });
       if (res.data.success) {
         setCartItems(res.data.cart);
         setUser({ ...user, cart: res.data.cart });
       }
-    } catch (e) { toast.error('Update failed'); } finally { setUpdatingId(null); }
+    } catch (e) { 
+      toast.error(e.response?.data?.message || 'Update failed'); 
+    } finally { setUpdatingId(null); }
   };
 
-  const removeItem = async (productId) => {
-    setUpdatingId(productId);
+  const removeItem = async (cartItemId) => {
+    setUpdatingId(cartItemId);
     try {
-      const res = await userAPI.removeFromCart(productId);
+      const res = await userAPI.removeFromCart(cartItemId);
       if (res.data.success) {
         setCartItems(res.data.cart);
         setUser({ ...user, cart: res.data.cart });
-        // Remove from selected items if needed
-        if (selectedItems.includes(productId)) {
-          setSelectedItems(selectedItems.filter(id => id !== productId));
+        
+        // Find product ID for this cart item to update selectedItems
+        const itemToRemove = cartItems.find(it => it._id === cartItemId);
+        if (itemToRemove && selectedItems.includes(itemToRemove.product._id)) {
+          setSelectedItems(selectedItems.filter(id => id !== itemToRemove.product._id));
         }
         toast.success('Removed');
       }
@@ -256,7 +273,14 @@ const Cart = () => {
     }
 
     if (!shippingAddress.fullName || !shippingAddress.combinedAddress || !shippingAddress.phoneNumber) {
-      toast.error('Please fill in all shipping address fields');
+      toast.error('Please fill in all shipping address fields and provide a contact number.');
+      return;
+    }
+
+    // FIXED: Block order if no payment method is selected
+    const validPaymentMethods = ['Cash on Delivery', 'bKash', 'Nagad', 'Rocket', 'Bank'];
+    if (!paymentMethod || !validPaymentMethods.includes(paymentMethod)) {
+      toast.error('Please select a valid payment method before placing your order.');
       return;
     }
 
@@ -265,31 +289,40 @@ const Cart = () => {
       return;
     }
 
+    if (paymentMethod !== 'Cash on Delivery') {
+       const gateway = paymentMethod.toLowerCase();
+       const paymentNumber = configs[`${gateway}_number`] || configs[`${gateway}_details`];
+       if (!paymentNumber || paymentNumber === 'N/A') {
+          toast.error(`Our ${paymentMethod} system is currently down. Please try another method.`);
+          return;
+       }
+    }
+
     setLoading(true);
     try {
       // Prepare order data with multi-seller structure
+      // NOTE: We send couponDiscount and couponDeliveryDiscount separately.
+      // The backend is the SINGLE SOURCE OF TRUTH — it recomputes membership discounts
+      // from the DB to avoid any double-counting issues.
       const orderData = {
         items: selectedCartItems.map(item => ({
           product: item.product._id,
           quantity: item.quantity,
-          price: item.product.sellingPrice,
+          price: item.price || item.product.sellingPrice,
+          variant: item.variant,
           seller: item.product.user?._id || item.product.user
         })),
-        subtotal: calculateSubtotal(),
-        vatPercentage: configs.vat_percentage,
-        vatAmount: calculateVAT(),
-        discount: (discount || 0) + membershipDiscountAmount,
-        shippingCost: calculateShipping(),
-        deliveryDiscount: deliveryDiscountAmount,
-        totalPrice: calculateTotal(),
+        // Send coupon discount (fixed amount) and delivery discount % separately
+        couponDiscount: discount || 0,
+        couponDeliveryDiscount: couponDeliveryDiscount || 0,
         shippingAddress: {
           fullName: shippingAddress.fullName,
           addressLine1: shippingAddress.combinedAddress,
           addressLine2: '',
-          city: 'Dhaka',
-          state: 'Dhaka',
-          postalCode: '1000',
-          country: 'Bangladesh',
+          city: shippingAddress.city || 'Dhaka',
+          state: shippingAddress.state || 'Dhaka',
+          postalCode: shippingAddress.postalCode || '1000',
+          country: shippingAddress.country || 'Bangladesh',
           phoneNumber: shippingAddress.phoneNumber
         },
         paymentMethod,
@@ -343,13 +376,11 @@ const Cart = () => {
       <Navbar />
       <div className="max-w-7xl mx-auto px-4 py-8">
         <h1 className="text-2xl font-bold text-gray-800 mb-2">Shopping Cart</h1>
-        <p className="text-gray-500 text-sm mb-8">{cartItems.length} item(s) in your cart</p>
-
-        <div className="flex flex-col lg:flex-row gap-8">
-          {/* Items List */}
+        <p className="text-gray-500 text-sm mb-8">{cartItems.length} item(s) in your cart</p>        <div className="flex flex-col lg:flex-row gap-8">
+          {/* Items List - Grouped by Seller */}
           <div className="flex-1">
             {/* Select All */}
-            <div className="bg-white p-4 rounded-xl border border-gray-100 mb-4 flex items-center justify-between">
+            <div className="bg-white p-4 rounded-xl border border-gray-100 mb-4 flex items-center justify-between shadow-sm">
               <label className="flex items-center gap-3 cursor-pointer">
                 <input
                   type="checkbox"
@@ -357,78 +388,122 @@ const Cart = () => {
                   onChange={selectAllItems}
                   className="w-5 h-5 accent-primary"
                 />
-                <span className="text-sm font-medium text-gray-700">Select All Items</span>
+                <span className="text-sm font-bold text-gray-700">Select All Items</span>
               </label>
-              <span className="text-sm text-gray-500">{selectedItems.length} of {cartItems.length} selected</span>
+              <span className="text-xs font-semibold px-3 py-1 bg-gray-100 rounded-full text-gray-500">
+                {selectedItems.length} of {cartItems.length} selected
+              </span>
             </div>
 
-            <div className="space-y-4">
-              {cartItems.map((item) => (
-                <div key={item.product._id} className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
-                  <div className="flex gap-4">
-                    <input
-                      type="checkbox"
-                      checked={selectedItems.includes(item.product._id)}
-                      onChange={() => toggleSelectItem(item.product._id)}
-                      className="w-5 h-5 accent-primary mt-1"
-                    />
-                    <img
-                      src={item.product.image || '/api/placeholder/80/80'}
-                      alt={item.product.name}
-                      className="w-20 h-20 object-cover rounded-lg border"
-                    />
-                    <div className="flex-1">
-                      <h3 className="font-semibold text-gray-800 text-base">{item.product.name}</h3>
-
-                      {/* Seller Info */}
-                      <div className="flex items-center gap-1">
-                        <Store size={12} className="text-gray-400" />
-                        <span className="text-xs text-gray-600">
-                          {item.product.user?.shopName || item.product.user?.name || 'Devaroti Store'}
-                        </span>
+            <div className="space-y-8">
+              {Array.from(uniqueSellers.values()).map((seller) => (
+                <div key={seller.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                  <div className="bg-gray-50/80 px-5 py-3 border-b border-gray-100 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Store size={18} className="text-primary" />
+                      <div>
+                        <h3 className="font-bold text-gray-800 text-sm">{seller.name}</h3>
+                        <p className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold">Verified Seller</p>
                       </div>
-<div className='flex gap-6' >
-                      <div className="flex items-center gap-3 mt-2">
-                        <span className="text-primary font-bold text-lg">৳{item.product.sellingPrice}</span>
-                        {item.product.sellingPrice < item.product.price && (
-                          <span className="text-gray-400 line-through text-sm">৳{item.product.price}</span>
-                        )}
-                      </div>
+                    </div>
+                    <button 
+                      onClick={() => handleChatWithSeller(seller.id)}
+                      className="text-primary hover:bg-primary/5 px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors"
+                    >
+                      <RefreshCw size={12} className="rotate-45" />
+                      Chat with Seller
+                    </button>
+                  </div>
 
-                      <div className="flex items-center gap-3 text-right">
-                        <div className="flex items-center border rounded-lg">
-                          <button
-                            onClick={() => updateQuantity(item.product._id, item.quantity - 1)}
-                            className="p-2 hover:bg-gray-50 transition disabled:opacity-50"
-                            disabled={updatingId === item.product._id}
-                          >
-                            <Minus size={14} />
-                          </button>
-                          <span className="w-10 text-center text-sm font-medium">
-                            {updatingId === item.product._id ? '...' : item.quantity}
-                          </span>
-                          <button
-                            onClick={() => updateQuantity(item.product._id, item.quantity + 1)}
-                            className="p-2 hover:bg-gray-50 transition"
-                            disabled={updatingId === item.product._id}
-                          >
-                            <Plus size={14} />
-                          </button>
+                  <div className="divide-y divide-gray-50">
+                    {seller.items.map((item) => (
+                      <div key={item._id} className="p-5 hover:bg-gray-50/30 transition-colors">
+                        <div className="flex gap-4">
+                          <div className="pt-1">
+                            <input
+                              type="checkbox"
+                              checked={selectedItems.includes(item.product._id)}
+                              onChange={() => toggleSelectItem(item.product._id)}
+                              className="w-5 h-5 accent-primary cursor-pointer"
+                            />
+                          </div>
+                          
+                          <Link to={`/shop`} className="shrink-0">
+                            <img
+                              src={item.product.image || '/api/placeholder/80/80'}
+                              alt={item.product.name}
+                              className="w-24 h-24 object-cover rounded-xl border border-gray-100 shadow-sm"
+                            />
+                          </Link>
+
+                          <div className="flex-1 flex flex-col min-w-0">
+                            <div className="flex justify-between items-start gap-4">
+                              <div className="min-w-0">
+                                <h4 className="font-bold text-gray-800 text-sm truncate hover:text-primary transition-colors">
+                                  {item.product.name}
+                                </h4>
+                                {item.variant && (
+                                  <div className="mt-1 flex gap-2">
+                                    <span className="text-[10px] bg-orange-50 text-orange-600 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider border border-orange-100">
+                                      {item.variant.name}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                              <button
+                                onClick={() => removeItem(item._id)}
+                                className="text-gray-300 hover:text-red-500 p-1.5 transition-colors rounded-lg hover:bg-red-50"
+                              >
+                                <Trash2 size={18} />
+                              </button>
+                            </div>
+
+                            <div className="mt-auto pt-4 flex items-end justify-between">
+                              <div className="flex flex-col">
+                                <span className="text-lg font-black text-gray-900">৳{item.price || item.product.sellingPrice}</span>
+                                { (item.price || item.product.sellingPrice) < (item.product.oldPrice || item.product.price) && (
+                                  <span className="text-xs text-gray-400 line-through">৳{item.product.oldPrice || item.product.price}</span>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-6">
+                                <div className="flex items-center bg-gray-100 rounded-xl p-1 gap-1">
+                                  <button
+                                    onClick={() => updateQuantity(item._id, item.quantity - 1)}
+                                    className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white hover:shadow-sm transition-all text-gray-500 disabled:opacity-30"
+                                    disabled={updatingId === item._id || item.quantity <= 1}
+                                  >
+                                    <Minus size={14} />
+                                  </button>
+                                  <span className="w-8 text-center text-sm font-bold text-gray-700">
+                                    {updatingId === item._id ? '..' : item.quantity}
+                                  </span>
+                                  <button
+                                    onClick={() => updateQuantity(item._id, item.quantity + 1)}
+                                    className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white hover:shadow-sm transition-all text-gray-500"
+                                    disabled={updatingId === item._id}
+                                  >
+                                    <Plus size={14} />
+                                  </button>
+                                </div>
+                                
+                                <div className="text-right hidden sm:block">
+                                  <p className="text-xs text-gray-400 font-bold uppercase tracking-tighter">Subtotal</p>
+                                  <p className="font-bold text-primary">
+                                    ৳{((item.price || item.product.sellingPrice) * item.quantity).toFixed(2)}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
                         </div>
-                        <button
-                          onClick={() => removeItem(item.product._id)}
-                          className="text-red-400 hover:text-red-600 p-2 transition"
-                        >
-                          <Trash2 size={16} />
-                        </button>
                       </div>
-</div>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-bold text-green-600">
-                        ৳{(item.product.sellingPrice * item.quantity).toFixed(2)}
-                      </p>
-                    </div>
+                    ))}
+                  </div>
+
+                  <div className="bg-primary/5 px-5 py-2 flex justify-between items-center text-[10px] font-bold text-primary uppercase tracking-widest">
+                    <span>Shipping from {seller.name}</span>
+                    <span>Fee: ৳{configs.delivery_charge}</span>
                   </div>
                 </div>
               ))}
@@ -581,22 +656,43 @@ const Cart = () => {
                       onChange={(e) => setShippingAddress({ ...shippingAddress, fullName: e.target.value })}
                       className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary"
                     />
-                    <textarea
-                      rows="3"
-                      placeholder="Full Address (Street, Area, City, Postal Code)"
-                      value={shippingAddress.combinedAddress}
-                      onChange={(e) => setShippingAddress({ ...shippingAddress, combinedAddress: e.target.value })}
-                      className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary resize-none"
-                    />
                     <input
-                      type="tel"
-                      placeholder="Phone Number"
-                      value={shippingAddress.phoneNumber}
-                      onChange={(e) => setShippingAddress({ ...shippingAddress, phoneNumber: e.target.value })}
+                      type="text"
+                      placeholder="City"
+                      value={shippingAddress.city}
+                      onChange={(e) => setShippingAddress({ ...shippingAddress, city: e.target.value })}
                       className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary"
                     />
+                    <div className="flex gap-3">
+                      <input
+                        type="text"
+                        placeholder="State/Division"
+                        value={shippingAddress.state}
+                        onChange={(e) => setShippingAddress({ ...shippingAddress, state: e.target.value })}
+                        className="flex-1 border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Postal Code"
+                        value={shippingAddress.postalCode}
+                        onChange={(e) => setShippingAddress({ ...shippingAddress, postalCode: e.target.value })}
+                        className="flex-1 border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary"
+                      />
+                    </div>
                   </div>
                 )}
+              </div>
+
+              {/* Contact Number */}
+              <div className="mb-6">
+                <label className="text-sm font-bold text-gray-700 uppercase block mb-2">Contact Number</label>
+                <input
+                  type="text"
+                  placeholder="Enter Contact Number"
+                  value={shippingAddress.phoneNumber}
+                  onChange={(e) => setShippingAddress({ ...shippingAddress, phoneNumber: e.target.value })}
+                  className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary"
+                />
               </div>
 
               {/* Payment Method */}

@@ -58,7 +58,7 @@ const userSchema = new mongoose.Schema({
 
   profilePic: {
     type: String,
-    default: 'https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_1280.png'
+    default: ''
   },
 
   bio:      { type: String, maxlength: [200, 'Bio cannot be more than 200 characters'] },
@@ -106,6 +106,10 @@ sellerRequestDate: { type: Date },
   cart: [{
     product:  { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
     quantity: { type: Number, default: 1, min: [1, 'Quantity must be at least 1'], max: [100, 'Quantity cannot exceed 100'] },
+    price: { type: Number },
+    variant: {
+      name: { type: String }
+    },
     addedAt:  { type: Date, default: Date.now }
   }],
 

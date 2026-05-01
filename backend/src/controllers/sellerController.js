@@ -223,28 +223,29 @@ const updateSellerOrder = async (req, res) => {
     const order = await Order.findById(req.params.id);
     if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
 
+    // 1. Find seller record in order
     const sellerIndex = order.sellers.findIndex(s => s.sellerId.toString() === sellerId);
-    if (sellerIndex === -1) {
-      const isAdmin = req.user.role === 'admin';
-      if (!isAdmin) {
-        return res.status(403).json({ success: false, message: 'Not authorized to update this order' });
-      }
+    if (sellerIndex === -1 && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Not authorized to update this order' });
     }
 
-    // Update seller-specific status if it exists
+    // 2. Update seller-specific status
     if (sellerIndex > -1 && status) {
       order.sellers[sellerIndex].status = status;
     }
 
-    // Update global status
-    // If Admin is updating, or if it's a single-seller order, or if all sellers have reached this status
+    // 3. Update global tracking if provided
+    if (trackingNumber) order.trackingNumber = trackingNumber;
+    if (courier) order.courier = courier;
+
+    // 4. Update global status based on multi-vendor rules
     const isSingleSeller = order.sellers.length <= 1;
     const isAdmin = req.user.role === 'admin';
     
     if (status && (isAdmin || isSingleSeller)) {
       order.status = status;
     } else if (status) {
-      // Logic for multi-seller: update global status only if all sellers are at least at this stage
+      // Multi-seller logic: update global status only if all sellers have reached this priority
       const statusPriority = {
         'pending': 0, 'confirmed': 1, 'processing': 2, 
         'shipped': 3, 'out-for-delivery': 4, 'delivered': 5,
@@ -252,23 +253,28 @@ const updateSellerOrder = async (req, res) => {
       };
       
       const targetStatusPriority = statusPriority[status] || 0;
-      
-      // Update this seller's status
-      order.sellers[sellerIndex].status = status;
 
       // Check if all sellers have reached or passed the target status
-      const allSellersReached = order.sellers.every(s => 
-        (statusPriority[s.status] || 0) >= targetStatusPriority
-      );
+      const allSellersReached = order.sellers.every(s => {
+        // For cancellation logic, if any is cancelled we handle it differently, 
+        // but for forward flow, all must be at least at targetStatusPriority
+        const sPriority = statusPriority[s.status] || 0;
+        return sPriority >= targetStatusPriority;
+      });
 
       if (allSellersReached) {
         order.status = status;
+        
+        // Auto-confirm payment for COD on delivery
+        if (status === 'delivered' && (order.paymentMethod === 'Cash on Delivery' || order.paymentMethod === 'cash')) {
+          order.paymentStatus = 'paid';
+          order.isPaid = true;
+          order.paidAt = new Date();
+        }
       }
     }
 
-    if (trackingNumber) order.trackingNumber = trackingNumber;
-    if (courier) order.courier = courier;
-
+    // 5. Audit Log
     order.statusHistory.push({
       status: status || order.status,
       date: new Date(),
@@ -277,6 +283,17 @@ const updateSellerOrder = async (req, res) => {
     });
 
     await order.save();
+
+    // Trigger balance sync for all sellers in the order if delivered
+    if (order.status === 'delivered') {
+      try {
+        const { syncSellerBalance } = require('../utils/balanceUtils');
+        await Promise.all(order.sellers.map(s => syncSellerBalance(s.sellerId)));
+      } catch (err) {
+        console.error('Balance sync error in updateSellerOrder:', err);
+      }
+    }
+
     return res.status(200).json({ success: true, message: 'Order updated successfully', order });
   } catch (error) {
     console.error('Update seller order error:', error);
@@ -423,19 +440,35 @@ const getSellerProfile = async (req, res) => {
   }
 };
 
+// @desc    Update seller profile
+const updateSellerProfile = async (req, res) => {
+  try {
+    const allowedFields = ['profilePic', 'shopName', 'shopDescription', 'shopLogo', 'shopBanner', 'shopLocation', 'paymentMethod', 'paymentDetails'];
+    const updates = {};
+    allowedFields.forEach(field => {
+      if (req.body[field] !== undefined) updates[field] = req.body[field];
+    });
+    const user = await User.findByIdAndUpdate(req.user.id, { $set: updates }, { new: true, runValidators: true }).select('-password');
+    return res.status(200).json({ success: true, profile: user });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Failed to update profile: ' + error.message });
+  }
+};
+
 const getSellerSales = async (req, res) => {
   try {
     const { page = 1, limit = 20 } = req.query;
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
 
+    // FIX: Sale model uses 'seller' field, not 'user'
     const [sales, total] = await Promise.all([
-      Sale.find({ user: req.user.id })
-        .populate('product', 'name')
+      Sale.find({ seller: req.user.id })
+        .populate('product', 'name image unit')
         .sort({ createdAt: -1 })
         .skip((pageNum - 1) * limitNum)
         .limit(limitNum),
-      Sale.countDocuments({ user: req.user.id })
+      Sale.countDocuments({ seller: req.user.id })
     ]);
 
     return res.status(200).json({
@@ -449,29 +482,115 @@ const getSellerSales = async (req, res) => {
 
 const createSellerSale = async (req, res) => {
   try {
-    const { product, quantity, totalAmount, paymentMethod, description } = req.body;
+    const { product, quantity, totalAmount, paymentMethod, description, customerName, customerPhone } = req.body;
+
+    if (!product || !quantity || !totalAmount) {
+      return res.status(400).json({ success: false, message: 'Product, quantity, and total amount are required' });
+    }
+
+    // FIX: ensure the product belongs to this seller
     const productInfo = await Product.findOne({ _id: product, user: req.user.id });
     if (!productInfo) return res.status(404).json({ success: false, message: 'Product not found or not yours' });
 
-    if (productInfo.stock < quantity) {
-      return res.status(400).json({ success: false, message: `Only ${productInfo.stock} units available` });
+    const qty = parseInt(quantity);
+    const total = parseFloat(totalAmount);
+
+    if (productInfo.stock < qty) {
+      return res.status(400).json({ success: false, message: `Insufficient stock. Only ${productInfo.stock} units available` });
     }
 
-    const purchasePrice = productInfo.purchasePrice * quantity;
-    const profit = totalAmount - purchasePrice;
+    const totalPurchasePrice = (productInfo.purchasePrice || 0) * qty;
+    const profit = total - totalPurchasePrice;
 
+    // FIX: use 'seller' field to match Sale schema
     const sale = await Sale.create({
-      product, quantity,
-      unitPrice: totalAmount / quantity,
-      totalAmount, purchasePrice, profit,
-      paymentMethod, notes: description,
-      user: req.user.id
+      product,
+      quantity: qty,
+      unitPrice: total / qty,
+      totalAmount: total,
+      purchasePrice: totalPurchasePrice,
+      profit,
+      paymentMethod: paymentMethod || 'Cash',
+      notes: description || '',
+      customerName: customerName || '',
+      customerPhone: customerPhone || '',
+      seller: req.user.id,
+      status: 'delivered'
     });
 
-    await Product.findByIdAndUpdate(product, { $inc: { stock: -quantity, soldCount: quantity } });
+    // Deduct stock and increase soldCount
+    await Product.findByIdAndUpdate(product, { $inc: { stock: -qty, soldCount: qty } });
 
+    await sale.populate('product', 'name image unit');
     return res.status(201).json({ success: true, sale });
   } catch (error) {
+    console.error('Create sale error:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const updateSellerSale = async (req, res) => {
+  try {
+    const sale = await Sale.findOne({ _id: req.params.id, seller: req.user.id });
+    if (!sale) return res.status(404).json({ success: false, message: 'Sale not found' });
+
+    const { quantity, totalAmount, paymentMethod, description, customerName, customerPhone } = req.body;
+
+    // If quantity changed, adjust stock accordingly
+    if (quantity !== undefined) {
+      const newQty = parseInt(quantity);
+      const qtyDiff = newQty - sale.quantity; // positive = more sold, negative = returned
+
+      const productInfo = await Product.findById(sale.product);
+      if (!productInfo) return res.status(404).json({ success: false, message: 'Product not found' });
+
+      if (qtyDiff > 0 && productInfo.stock < qtyDiff) {
+        return res.status(400).json({ success: false, message: `Insufficient stock. Only ${productInfo.stock} additional units available` });
+      }
+
+      // Adjust stock: restore old qty, deduct new qty
+      await Product.findByIdAndUpdate(sale.product, { $inc: { stock: -qtyDiff, soldCount: qtyDiff } });
+
+      const total = parseFloat(totalAmount || sale.totalAmount);
+      const totalPurchasePrice = (productInfo.purchasePrice || 0) * newQty;
+      sale.quantity = newQty;
+      sale.unitPrice = total / newQty;
+      sale.totalAmount = total;
+      sale.purchasePrice = totalPurchasePrice;
+      sale.profit = total - totalPurchasePrice;
+    } else if (totalAmount !== undefined) {
+      const total = parseFloat(totalAmount);
+      sale.totalAmount = total;
+      sale.unitPrice = total / sale.quantity;
+      sale.profit = total - sale.purchasePrice;
+    }
+
+    if (paymentMethod !== undefined) sale.paymentMethod = paymentMethod;
+    if (description !== undefined) sale.notes = description;
+    if (customerName !== undefined) sale.customerName = customerName;
+    if (customerPhone !== undefined) sale.customerPhone = customerPhone;
+
+    await sale.save();
+    await sale.populate('product', 'name image unit');
+    return res.status(200).json({ success: true, sale });
+  } catch (error) {
+    console.error('Update sale error:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const deleteSellerSale = async (req, res) => {
+  try {
+    const sale = await Sale.findOne({ _id: req.params.id, seller: req.user.id });
+    if (!sale) return res.status(404).json({ success: false, message: 'Sale not found' });
+
+    // Restore stock on deletion
+    await Product.findByIdAndUpdate(sale.product, { $inc: { stock: sale.quantity, soldCount: -sale.quantity } });
+    await Sale.findByIdAndDelete(sale._id);
+
+    return res.status(200).json({ success: true, message: 'Sale deleted and stock restored' });
+  } catch (error) {
+    console.error('Delete sale error:', error);
     return res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -564,6 +683,29 @@ const createSellerTransaction = async (req, res) => {
   }
 };
 
+const getSellerWithdrawals = async (req, res) => {
+  try {
+    const { page = 1, limit = 20 } = req.query;
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+
+    const [withdrawals, total] = await Promise.all([
+      Transaction.find({ user: req.user.id, category: 'withdrawals' })
+        .sort({ createdAt: -1 })
+        .skip((pageNum - 1) * limitNum)
+        .limit(limitNum),
+      Transaction.countDocuments({ user: req.user.id, category: 'withdrawals' })
+    ]);
+
+    return res.status(200).json({
+      success: true, withdrawals,
+      pagination: { page: pageNum, limit: limitNum, total, pages: Math.ceil(total / limitNum) }
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Failed to fetch withdrawals: ' + error.message });
+  }
+};
+
 const getSellerCustomers = async (req, res) => {
   try {
     const sellerId = new mongoose.Types.ObjectId(req.user.id);
@@ -589,7 +731,10 @@ const getSellerCustomers = async (req, res) => {
 
 module.exports = {
   getSellerStats, getSellerProducts, createSellerProduct, updateSellerProduct, deleteSellerProduct,
-  getSellerOrders, updateSellerOrder, getSellerEarnings, requestWithdrawal, getSellerProfile,
-  getSellerSales, createSellerSale, getSellerPurchases, createSellerPurchase,
-  getSellerTransactions, createSellerTransaction, getSellerCustomers, syncBalance
+  getSellerOrders, updateSellerOrder, getSellerEarnings, requestWithdrawal,
+  getSellerProfile, updateSellerProfile,
+  getSellerSales, createSellerSale, updateSellerSale, deleteSellerSale,
+  getSellerPurchases, createSellerPurchase,
+  getSellerTransactions, createSellerTransaction, getSellerCustomers, syncBalance,
+  getSellerWithdrawals
 };

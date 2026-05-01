@@ -140,6 +140,12 @@ const productSchema = new mongoose.Schema({
   metaDescription: String,
   metaKeywords: [String],
   
+  variants: [{
+    name: { type: String, required: true },
+    price: { type: Number },
+    stock: { type: Number, default: 0 }
+  }],
+  
   soldCount: {
     type: Number,
     default: 0
@@ -154,11 +160,16 @@ const productSchema = new mongoose.Schema({
   toObject: { virtuals: true }
 });
 
-// Indexes for better query performance
+// Indexes for performance
 productSchema.index({ name: 'text', description: 'text', category: 'text' });
 productSchema.index({ sellingPrice: 1 });
 productSchema.index({ createdAt: -1 });
 productSchema.index({ soldCount: -1 });
+productSchema.index({ liveStatus: 1, createdAt: -1 });
+productSchema.index({ category: 1, sellingPrice: 1 });
+productSchema.index({ isFeatured: 1, createdAt: -1 });
+productSchema.index({ isBestSeller: 1, createdAt: -1 });
+productSchema.index({ isNewArrival: 1, createdAt: -1 });
 
 // Create slug from name
 productSchema.pre('save', function(next) {

@@ -120,10 +120,11 @@ export const userAPI = {
   getProfile:     ()                         => api.get('/api/users/profile'),
   updateProfile:  (data)                     => api.put('/api/users/profile', data),
   deleteAccount:  ()                         => api.delete('/api/users/account'),
+  uploadProfileImage: (formData)             => api.post('/api/upload', formData),
   // Cart
   addToCart:      (data)                     => api.post('/api/users/cart', data),
-  updateCartItem: (productId, data)          => api.put(`/api/users/cart/${productId}`, data),
-  removeFromCart: (productId)                => api.delete(`/api/users/cart/${productId}`),
+  updateCartItem: (cartItemId, data)         => api.put(`/api/users/cart/${cartItemId}`, data),
+  removeFromCart: (cartItemId)               => api.delete(`/api/users/cart/${cartItemId}`),
   clearCart:      ()                         => api.delete('/api/users/cart'),
   // Favorites
   getFavorites:   ()                         => api.get('/api/users/favorites'),
@@ -156,7 +157,8 @@ export const productAPI = {
 export const orderAPI = {
   createOrder:       (data)            => api.post('/api/orders', data),
   checkout:          (data)            => api.post('/api/orders', data), // Assuming /api/orders for checkout
-  getPublicConfig:   (key)             => api.get(`/api/config/public/${key}`), // Assuming /api/config
+  getPublicConfig:   (key)             => api.get(`/api/config/public/${key}`),
+  getPublicConfigs:  ()                => api.get('/api/config/public'),
   getMyOrders:       (params)          => api.get('/api/orders/my-orders', { params }),
   getOrder:          (id)              => api.get(`/api/orders/${id}`),
   cancelOrder:       (id, reason)      => api.put(`/api/orders/${id}/cancel`, { reason }),
@@ -191,10 +193,12 @@ export const adminAPI = {
   updateUser:        (id, data)    => api.put(`/api/admin/users/${id}`, data),
   deleteUser:        (id)          => api.delete(`/api/admin/users/${id}`),
   approveSeller:     (id, data)    => api.put(`/api/admin/approve-seller/${id}`, data),
+  getSellerRequests: (params)      => api.get('/api/admin/seller-requests', { params }),
 
   getOrders:         (params)      => api.get('/api/admin/orders', { params }),
   updateOrder:       (id, data)    => api.put(`/api/admin/orders/${id}`, data),
   confirmOrderPayment: (id)        => api.put(`/api/orders/admin/${id}/confirm-payment`),
+  failOrderPayment:  (id)          => api.put(`/api/orders/admin/${id}/fail-payment`),
   verifyBankPayment: (orderId, data) => api.put(`/api/payment/bank/verify/${orderId}`, data),
 
   getProducts:       (params)      => api.get('/api/admin/products', { params }),
@@ -216,6 +220,8 @@ export const adminAPI = {
   // Config
   getConfig:         ()            => api.get('/api/admin/config'),
   updateConfig:      (data)        => api.put('/api/admin/config', data),
+  updateHeaderContent: (data)      => api.post('/api/admin/header-content', data),
+  getHeaderHistory:  ()            => api.get('/api/admin/header-history'),
   
   // Withdrawals (New Controller)
   getWithdrawals:    (params)      => api.get('/api/withdrawals/admin/all', { params }),
@@ -232,6 +238,7 @@ export const adminAPI = {
 export const sellerAPI = {
   getStats:       (params) => api.get('/api/seller/stats', { params }),
   getProfile:     ()       => api.get('/api/seller/profile'),
+  updateProfile:  (data)   => api.put('/api/seller/profile', data),
   getEarnings:    (params) => api.get('/api/seller/earnings', { params }),
 
   getProducts:    (params) => api.get('/api/seller/products', { params }),
@@ -250,6 +257,8 @@ export const sellerAPI = {
 
   getSales:       (params) => api.get('/api/seller/sales', { params }),
   createSale:     (data)   => api.post('/api/seller/sales', data),
+  updateSale:     (id, data) => api.put(`/api/seller/sales/${id}`, data),
+  deleteSale:     (id)     => api.delete(`/api/seller/sales/${id}`),
 
   getPurchases:   (params) => api.get('/api/seller/purchases', { params }),
   createPurchase: (data)   => api.post('/api/seller/purchases', data),
@@ -257,8 +266,19 @@ export const sellerAPI = {
   getTransactions: (params) => api.get('/api/seller/transactions', { params }),
   createTransaction: (data) => api.post('/api/seller/transactions', data),
   
-  getChats:       (params) => api.get('/api/seller/chats', { params }),
-  replyToChat:    (id, data) => api.post(`/api/seller/chats/${id}/reply`, data),
+  getChats:       (params) => api.get('/api/chats', { params }),
+  getMessages:    (id)     => api.get(`/api/chats/${id}`),
+  sendMessage:    (data)   => api.post('/api/chats/send', data),
+};
+
+// ==================== CHAT API ====================
+export const chatAPI = {
+  getChats:       (params) => api.get('/api/chats', { params }),
+  getMessages:    (id)     => api.get(`/api/chats/${id}`),
+  getChatWithUser: (receiverId) => api.get(`/api/chats/with/${receiverId}`),
+  sendMessage:    (data)   => api.post('/api/chats/send', data),
+  getAdmin:       ()       => api.get('/api/chats/admin'),
+  editMessage:    (chatId, messageId, data) => api.put(`/api/chats/${chatId}/message/${messageId}`, data),
 };
 
 // ==================== COURIER API ====================
@@ -266,6 +286,11 @@ export const courierAPI = {
   getStats:           () => api.get('/api/courier/stats'),
   getDeliveries:      () => api.get('/api/courier/deliveries'),
   updateDeliveryStatus: (id, status) => api.put(`/api/courier/deliveries/${id}/status`, { status }),
+};
+
+// ==================== UPLOAD API ====================
+export const uploadAPI = {
+  uploadImages: (formData) => api.post('/api/upload', formData),
 };
 
 export default api;

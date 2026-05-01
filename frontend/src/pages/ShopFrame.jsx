@@ -94,22 +94,22 @@ export const FILTER_GROUPS = {
   brand: { 
     label: "Brand", 
     options: ["Local", "National", "Traditional", "Professional", "International", "Devotional", "Global", "Exclusive", "Experimental", "Imported"],
-    icons: { Local: "🇧🇩", National: "🇮🇳", International: "🌍", Global: "🌎" }
+    // icons: { Local: "🇧🇩", National: "🇮🇳", International: "🌍", Global: "🌎" }
   },
   material: { 
     label: "Material", 
     options: ["Aluminum", "Glass", "Wood", "Fabric", "Fiber", "Steel", "Copper", "Bronze", "Silver", "Gold"],
-    icons: { Gold: "🥇", Silver: "🥈", Bronze: "🥉" }
+    // icons: { Gold: "🥇", Silver: "🥈", Bronze: "🥉" }
   },
   color: { 
     label: "Color", 
-    options: ["Black", "White", "Red", "Green", "Blue", "Silver", "Gold", "Purple", "Yellow", "Orange"],
-    colorCodes: { Black: "#000", White: "#fff", Red: "#ef4444", Green: "#10b981", Blue: "#3b82f6", Silver: "#94a3b8", Gold: "#fbbf24", Purple: "#8b5cf6" }
+    options: ["Black", "White", "Red", "Green", "Blue", "Silver", "Gold", "Purple", "Yellow", "Orange", "Pink", "Other"],
+    colorCodes: { Black: "#000", White: "#fff", Red: "#ef4444", Green: "#10b981", Blue: "#3b82f6", Silver: "#94a3b8", Gold: "#fbbf24", Purple: "#8b5cf6", Yellow: "#eab308", Orange: "#f97316", Pink: "#ec4899", Other: "#6b7280" }
   },
   area: { 
     label: "Area", 
     options: ["Dhaka", "Chittagong", "Khulna", "Rajshahi", "Rangpur", "Sylhet", "Mymensingh", "Cumilla", "Barisal"],
-    icons: { Dhaka: "🏙️", Chittagong: "🏖️", Sylhet: "⛰️" }
+    // icons: { Dhaka: "🏙️", Chittagong: "🏖️", Sylhet: "⛰️" }
   },
 };
 
@@ -169,11 +169,11 @@ const getRatingLabel = (rating) => {
 // ==================== ADVANCED RATING FILTER ====================
 export const RatingFilter = memo(({ rating, setRating, onReset, counts = {} }) => {
   const stars = [
-    { value: 5, label: "5 Stars", min: 5, max: 5 },
-    { value: 4, label: "4 Stars & Up", min: 4, max: 5 },
-    { value: 3, label: "3 Stars & Up", min: 3, max: 5 },
-    { value: 2, label: "2 Stars & Up", min: 2, max: 5 },
-    { value: 1, label: "1 Star & Up", min: 1, max: 5 }
+    { value: 5, label: "5*", min: 5, max: 5 },
+    { value: 4, label: "4*+", min: 4, max: 5 },
+    { value: 3, label: "3*+", min: 3, max: 5 },
+    { value: 2, label: "2*+", min: 2, max: 5 },
+    { value: 1, label: "1*+", min: 1, max: 5 }
   ];
   
   const handleRatingChange = useCallback((value) => {
@@ -808,7 +808,7 @@ export const FilterSidebar = memo(({
         <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wider mb-3 flex items-center gap-2">
           <Clock size={14} /> Availability
         </h3>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 gap-2">
           {["In Stock", "Pre Order", "Up Coming", "Limited Edition"].map(opt => (
             <label key={opt} className="flex items-center gap-2 py-1.5 cursor-pointer group">
               <input 
@@ -853,7 +853,7 @@ export const FilterSidebar = memo(({
                 exit={{ height: 0, opacity: 0 }}
                 className="overflow-hidden"
               >
-                <div className="px-5 pb-4 pt-1 grid grid-cols-2 gap-2">
+                <div className="px-5 pb-4 pt-1 grid grid-cols-1 gap-2">
                   {group.options.map(opt => (
                     <label key={opt} className="flex items-center gap-2 py-1 cursor-pointer group">
                       <input 

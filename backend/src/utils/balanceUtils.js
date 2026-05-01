@@ -13,8 +13,8 @@ const syncSellerBalance = async (sellerId) => {
   try {
     const sId = new mongoose.Types.ObjectId(sellerId);
 
-    // 1. Calculate Lifetime Earnings from Delivered Orders
-    const earningsResult = await Order.aggregate([
+    // 1. Calculate Lifetime Sales and Net Earnings from Delivered Orders
+    const aggregationResult = await Order.aggregate([
       { 
         $match: { 
           'sellers.sellerId': sId, 
@@ -24,11 +24,18 @@ const syncSellerBalance = async (sellerId) => {
       },
       { $unwind: '$sellers' },
       { $match: { 'sellers.sellerId': sId } },
-      { $group: { _id: null, total: { $sum: '$sellers.sellerEarnings' } } }
+      { 
+        $group: { 
+          _id: null, 
+          grossSales: { $sum: '$sellers.subtotal' },
+          netEarnings: { $sum: '$sellers.sellerEarnings' }
+        } 
+      }
     ]);
-
-    const totalEarnings = earningsResult[0]?.total || 0;
-
+ 
+    const totalEarnings = aggregationResult[0]?.netEarnings || 0; // Show net earnings as per user request
+    const netEarningsTotal = aggregationResult[0]?.netEarnings || 0;
+ 
     // 2. Calculate Completed Withdrawals (Cash Out)
     const withdrawalsResult = await Transaction.aggregate([
       { 
@@ -60,9 +67,8 @@ const syncSellerBalance = async (sellerId) => {
     const pendingWithdrawals = pendingResult[0]?.total || 0;
 
     // 4. Calculate Current Cash Box
-    // cashBox = Total Earnings - (Both Completed and Pending Withdrawals)
-    // because pending withdrawals are already deducted from cashBox at the time of request
-    const cashBox = Math.max(0, totalEarnings - totalWithdrawn - pendingWithdrawals);
+    // cashBox = Net Earnings - (Both Completed and Pending Withdrawals)
+    const cashBox = Math.max(0, netEarningsTotal - totalWithdrawn - pendingWithdrawals);
 
     // 5. Update User Document
     const user = await User.findByIdAndUpdate(

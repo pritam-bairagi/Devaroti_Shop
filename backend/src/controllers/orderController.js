@@ -23,7 +23,10 @@ exports.createOrder = async (req, res) => {
     }
 
     const {
-      items, discount = 0, shippingAddress, paymentMethod,
+      items,
+      couponDiscount = 0,        // Only the coupon fixed-amount discount from frontend
+      couponDeliveryDiscount = 0, // Coupon delivery discount % from frontend
+      shippingAddress, paymentMethod,
       deliveryOption = 'standard', deliveryInstructions, orderNotes, paymentDetails
     } = req.body;
 
@@ -34,6 +37,22 @@ exports.createOrder = async (req, res) => {
     if (!shippingAddress || !shippingAddress.addressLine1) {
       return res.status(400).json({ success: false, message: 'Shipping address is required' });
     }
+
+    // --- Dynamic Pricing from SystemConfig ---
+    const allConfigs = await SystemConfig.find({ 
+      key: { $in: [
+        'vat_percentage', 'delivery_charge', 'platform_commission_rate',
+        'membership_bronze_discount', 'membership_silver_discount', 
+        'membership_gold_discount', 'membership_platinum_discount',
+        'membership_bronze_delivery_discount', 'membership_silver_delivery_discount',
+        'membership_gold_delivery_discount', 'membership_platinum_delivery_discount'
+      ] } 
+    });
+    const configMap = allConfigs.reduce((acc, c) => ({ ...acc, [c.key]: Number(c.value) }), {});
+
+    const platformCommissionRate = configMap.platform_commission_rate !== undefined ? (configMap.platform_commission_rate / 100) : COMMISSION_RATE;
+    const vatPercent = configMap.vat_percentage || 2;
+    const baseShipping = configMap.delivery_charge !== undefined ? configMap.delivery_charge : 60;
 
     const processedItems = [];
     let calculatedSubtotal = 0;
@@ -58,19 +77,35 @@ exports.createOrder = async (req, res) => {
 
       const quantity = Number(item.quantity) || 1;
 
-      if (product.stock < quantity) {
-        return res.status(400).json({
-          success: false,
-          message: `Insufficient stock for ${product.name}. Available: ${product.stock}`
-        });
+      // RE-CALCULATE PRICE FROM DB (SOURCE OF TRUTH)
+      let itemPrice = product.sellingPrice;
+      if (item.variant && item.variant.name && product.variants && product.variants.length > 0) {
+        const variant = product.variants.find(v => v.name === item.variant.name);
+        if (variant && variant.price) {
+          itemPrice = variant.price;
+        }
       }
 
-      const itemPrice = Number(item.price) || product.sellingPrice;
+      // Stock check for variant specifically
+      if (item.variant && item.variant.name && product.variants && product.variants.length > 0) {
+        const variant = product.variants.find(v => v.name === item.variant.name);
+        if (variant && variant.stock < quantity) {
+          return res.status(400).json({ success: false, message: `Insufficient stock for ${product.name} (${variant.name})` });
+        }
+      } else if (product.stock < quantity) {
+        return res.status(400).json({ success: false, message: `Insufficient stock for ${product.name}` });
+      }
+
+      const purchasePrice = Number(product.purchasePrice) || 0;
+      
       const itemTotal = itemPrice * quantity;
+      const itemPurchaseTotal = purchasePrice * quantity;
       calculatedSubtotal += itemTotal;
 
-      const commission = itemTotal * COMMISSION_RATE;
+      const commission = itemTotal * platformCommissionRate;
       platformCommission += commission;
+      
+      // Calculate earnings for seller based purely on selling price minus commission
       const sellerEarning = itemTotal - commission;
       sellerEarningsTotal += sellerEarning;
 
@@ -78,9 +113,10 @@ exports.createOrder = async (req, res) => {
         product: product._id,
         quantity,
         price: itemPrice,
-        purchasePrice: product.purchasePrice || 0,
+        purchasePrice: purchasePrice,
         name: product.name,
         image: product.image,
+        variant: item.variant,
         seller: product.user
       });
 
@@ -95,31 +131,40 @@ exports.createOrder = async (req, res) => {
       sellerData.sellerEarnings += sellerEarning;
     }
 
-    // --- Dynamic Pricing from SystemConfig ---
-    const allConfigs = await SystemConfig.find({ 
-      key: { $in: [
-        'vat_percentage', 'delivery_charge', 
-        'membership_bronze_discount', 'membership_silver_discount', 
-        'membership_gold_discount', 'membership_platinum_discount'
-      ] } 
-    });
-    const configMap = allConfigs.reduce((acc, c) => ({ ...acc, [c.key]: Number(c.value) }), {});
-
-    const vatPercent = configMap.vat_percentage || 2;
-    const baseShipping = configMap.delivery_charge !== undefined ? configMap.delivery_charge : 60;
-    
     // Multi-Seller Shipping calculation
     const shippingCostValue = baseShipping * Math.max(1, sellersMap.size);
-    
-    // Membership Discount Calculation
+
+    // ── Membership Discounts (single source of truth — computed by backend only) ──
     const userObj = await User.findById(req.user.id);
     const mLevel = userObj?.membershipLevel?.toLowerCase() || 'bronze';
     const mDiscountPercent = configMap[`membership_${mLevel}_discount`] || 0;
     const membershipDiscountAmount = (calculatedSubtotal * mDiscountPercent) / 100;
 
-    const discountNum = (Number(discount) || 0) + membershipDiscountAmount;
-    const vatAmount = (calculatedSubtotal - (Number(discount) || 0)) * (vatPercent / 100);
-    const totalPrice = calculatedSubtotal + shippingCostValue + vatAmount - discountNum;
+    // Delivery discount: membership delivery % + coupon delivery % (capped at 100%)
+    const mDeliveryDiscountPercent = configMap[`membership_${mLevel}_delivery_discount`] || 0;
+    const totalDeliveryDiscountPercent = Math.min(
+      100,
+      mDeliveryDiscountPercent + (Number(couponDeliveryDiscount) || 0)
+    );
+    const deliveryDiscountAmount = (shippingCostValue * totalDeliveryDiscountPercent) / 100;
+
+    // Final shipping after delivery discount
+    const finalShipping = shippingCostValue - deliveryDiscountAmount;
+
+    // Coupon product discount (fixed amount from validated coupon)
+    const couponDiscountNum = Number(couponDiscount) || 0;
+
+    // Total product discount = coupon + membership
+    const totalProductDiscount = couponDiscountNum + membershipDiscountAmount;
+
+    // VAT is calculated on the subtotal (before discount), matching the cart display
+    const vatAmount = calculatedSubtotal * (vatPercent / 100);
+
+    // Final total: subtotal + vat + shipping(after delivery discount) - product discounts
+    const totalPrice = Math.max(
+      0,
+      calculatedSubtotal + vatAmount + finalShipping - totalProductDiscount
+    );
 
     const isCOD = paymentMethod === 'Cash on Delivery' || paymentMethod === 'cash';
     const paymentStatus = isCOD ? 'pending' : 'processing';
@@ -135,10 +180,10 @@ exports.createOrder = async (req, res) => {
       user: req.user.id,
       items: processedItems,
       subtotal: calculatedSubtotal,
-      discount: discountNum,
+      discount: totalProductDiscount,        // Stored: coupon + membership (product discounts only)
       vat: vatPercent,
       vatAmount,
-      shippingCost: shippingCostValue,
+      shippingCost: finalShipping,           // Stored: shipping after delivery discount applied
       totalPrice,
       shippingAddress: {
         fullName: shippingAddress.fullName || req.user.name,
@@ -177,9 +222,21 @@ exports.createOrder = async (req, res) => {
 
     // Decrease stock
     for (const item of processedItems) {
-      await Product.findByIdAndUpdate(item.product, {
-        $inc: { stock: -item.quantity, soldCount: item.quantity }
-      });
+      const product = await Product.findById(item.product);
+      if (product) {
+        // Update total product stock
+        product.stock -= item.quantity;
+        product.soldCount += item.quantity;
+
+        // Update variant stock if applicable
+        if (item.variant && item.variant.name && product.variants && product.variants.length > 0) {
+          const vIndex = product.variants.findIndex(v => v.name === item.variant.name);
+          if (vIndex !== -1) {
+            product.variants[vIndex].stock -= item.quantity;
+          }
+        }
+        await product.save();
+      }
     }
 
     // Clear user cart & update stats
@@ -296,9 +353,19 @@ exports.cancelOrder = async (req, res) => {
 
     // Restore stock and user stats
     for (const item of order.items) {
-      await Product.findByIdAndUpdate(item.product, {
-        $inc: { stock: item.quantity, soldCount: -item.quantity }
-      });
+      const product = await Product.findById(item.product);
+      if (product) {
+        product.stock += item.quantity;
+        product.soldCount -= item.quantity;
+
+        if (item.variant && item.variant.name && product.variants && product.variants.length > 0) {
+          const vIndex = product.variants.findIndex(v => v.name === item.variant.name);
+          if (vIndex !== -1) {
+            product.variants[vIndex].stock += item.quantity;
+          }
+        }
+        await product.save();
+      }
     }
 
     await User.findByIdAndUpdate(req.user.id, {
@@ -514,5 +581,33 @@ exports.adminConfirmOrderPayment = async (req, res) => {
   } catch (error) {
     console.error('Confirm payment error:', error);
     res.status(500).json({ success: false, message: 'Failed to confirm payment: ' + error.message });
+  }
+};
+
+// @desc    Admin fails order payment (Manual flow)
+// @route   PUT /api/orders/admin/:id/fail-payment
+// @access  Private/Admin
+exports.adminFailOrderPayment = async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
+
+    order.adminConfirmedPayment = false;
+    order.paymentStatus = 'failed';
+    order.isPaid = false;
+
+    order.statusHistory.push({
+      status: order.status,
+      date: new Date(),
+      note: 'Payment marked as failed by Admin',
+      updatedBy: req.user.id
+    });
+
+    await order.save();
+
+    res.status(200).json({ success: true, message: 'Payment marked as failed.', order });
+  } catch (error) {
+    console.error('Fail payment error:', error);
+    res.status(500).json({ success: false, message: 'Failed to mark payment as failed: ' + error.message });
   }
 };

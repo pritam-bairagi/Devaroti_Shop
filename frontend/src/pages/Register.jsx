@@ -97,7 +97,7 @@ const Register = () => {
       <div className="p-8">
         <div className="text-center mb-8">
           <h2 className="text-3xl font-black text-gray-900 mb-2">Create Account</h2>
-          <p className="text-gray-600">Join Parash Feri today</p>
+          <p className="text-gray-600">Join Devaroti Shop today</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">

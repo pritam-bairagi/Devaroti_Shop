@@ -18,6 +18,7 @@ router.get('/users/:id', adminController.getUserDetails);
 router.put('/users/:id', adminController.updateUser);
 router.delete('/users/:id', adminController.deleteUser);
 router.put('/approve-seller/:id', adminController.approveSeller);
+router.get('/seller-requests', adminController.getSellerRequests);
 
 // Order Management
 router.get('/orders', adminController.getAllOrders);
@@ -42,6 +43,8 @@ router.post('/purchases', adminController.createPurchase);
 // System Configuration
 router.get('/config', adminController.getSystemConfig);
 router.put('/config', adminController.updateSystemConfig);
+router.post('/header-content', adminController.updateHeaderContent);
+router.get('/header-history', adminController.getHeaderHistory);
 
 // Withdrawal Management
 router.get('/withdrawals', adminController.getWithdrawalRequests);

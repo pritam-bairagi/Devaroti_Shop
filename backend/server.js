@@ -1,7 +1,28 @@
+require('express-async-errors');
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const helmet = require('helmet');
+const compression = require('compression');
+const mongoSanitize = require('express-mongo-sanitize');
+const rateLimit = require('express-rate-limit');
 const dotenv = require('dotenv');
+const morgan = require('morgan');
+const cluster = require('cluster');
+const os = require('os');
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 1000, // Increased from 100 to 1000 to accommodate dashboard requests
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: 'Too many requests from this IP, please try again after 15 minutes'
+  }
+});
+
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
@@ -21,11 +42,27 @@ const startServer = async () => {
     socketAction.initSocket(server);
 
     app.use(cors({
-      origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+      origin: [process.env.FRONTEND_URL, 'http://localhost:5173', 'http://localhost:5174', 'http://localhost:5175'],
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
       allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
     }));
+
+    if (process.env.NODE_ENV === 'development') {
+      app.use(morgan('dev'));
+    } else {
+      app.use(morgan('combined'));
+    }
+
+    app.use(compression());
+    app.use(mongoSanitize());
+    app.use(helmet({
+      contentSecurityPolicy: false,
+      crossOriginEmbedderPolicy: false
+    }));
+
+    // Apply rate limiter to all API routes
+    app.use('/api', limiter);
 
     // FIX: Stripe webhook needs raw body — must come BEFORE express.json()
     app.use('/api/payment/stripe/webhook',
@@ -33,12 +70,12 @@ const startServer = async () => {
       (req, res, next) => { req.rawBody = req.body; next(); }
     );
 
-    app.use(express.json({ limit: '50mb' }));
-    app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+    app.use(express.json({ limit: '1mb' }));
+    app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
     const uploadsDir = path.join(__dirname, 'uploads');
     if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-    app.use('/uploads', express.static(uploadsDir));
+    app.use('/uploads', express.static(uploadsDir, { maxAge: '1d' }));
 
     // Routes
     app.use('/api/auth', require('./src/routes/authRoutes'));
@@ -53,6 +90,8 @@ const startServer = async () => {
     app.use('/api/coupons', require('./src/routes/couponRoutes'));
     app.use('/api/withdrawals', require('./src/routes/withdrawalRoutes'));
     app.use('/api/courier', require('./src/routes/courierRoutes'));
+    app.use('/api/chats', require('./src/routes/chatRoutes'));
+    app.use('/api/upload', require('./src/routes/uploadRoutes'));
 
     // FIX: Google OAuth callback must be public (no admin middleware)
     app.get(
@@ -100,7 +139,22 @@ const startServer = async () => {
   }
 };
 
-startServer();
+if (cluster.isMaster && process.env.NODE_ENV === 'production') {
+  const numCPUs = os.cpus().length;
+  console.log(`\n🚀 Master ${process.pid} is running`);
+  console.log(`🧵 Spanning ${numCPUs} workers...\n`);
+
+  for (let i = 0; i < numCPUs; i++) {
+    cluster.fork();
+  }
+
+  cluster.on('exit', (worker, code, signal) => {
+    console.log(`⚠️ Worker ${worker.process.pid} died. Restarting...`);
+    cluster.fork();
+  });
+} else {
+  startServer();
+}
 
 process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception:', err.message);

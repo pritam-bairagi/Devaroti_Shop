@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /admin/
+Disallow: /seller/
+Disallow: /courier/
+Disallow: /dashboard/
+Disallow: /profile/
+Disallow: /checkout/
+
+Sitemap: https://devarotishop.com/sitemap.xml

@@ -148,8 +148,11 @@ const Favorites = () => {
                     </h3>
                   </Link>
 
-                  <p className="text-sm text-gray-500 mb-3">
+                  <p className="text-sm text-gray-500 mb-1">
                     {product.category}
+                  </p>
+                  <p className="text-[10px] text-primary font-bold uppercase tracking-wider mb-2">
+                    Seller: {product.user?.shopName || product.user?.name || "Devaroti Official"}
                   </p>
 
                   <div className="flex items-center justify-between">

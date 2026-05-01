@@ -62,7 +62,7 @@ const Login = () => {
       <div className="p-8">
         <div className="text-center mb-8">
           <h2 className="text-3xl font-black text-gray-900 mb-2">Welcome Back</h2>
-          <p className="text-gray-600">Sign in to continue to Parash Feri</p>
+          <p className="text-gray-600">Sign in to continue to Devaroti Shop</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">

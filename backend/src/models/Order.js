@@ -17,6 +17,7 @@ const orderSchema = new mongoose.Schema({
     price:         { type: Number, required: true },
     purchasePrice: { type: Number, default: 0 },
     image:         String,
+    variant:       { name: String },
     seller:        { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
   }],
 
@@ -140,12 +141,12 @@ const orderSchema = new mongoose.Schema({
   toObject: { virtuals: true }
 });
 
-// Indexes
+// Indexes for performance
+orderSchema.index({ orderNumber: 1 }, { unique: true });
 orderSchema.index({ user: 1, createdAt: -1 });
-orderSchema.index({ 'sellers.sellerId': 1 });
-orderSchema.index({ orderNumber: 1 });
 orderSchema.index({ status: 1, createdAt: -1 });
-orderSchema.index({ paymentStatus: 1 });
+orderSchema.index({ 'sellers.sellerId': 1, createdAt: -1 });
+orderSchema.index({ createdAt: -1 });
 
 // Pre-save hook
 orderSchema.pre('save', async function (next) {

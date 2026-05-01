@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { 
   ShoppingBag, Truck, RotateCcw, CreditCard, Headset, Shield, 
-  Leaf, HeartHandshake, ArrowRight, Sparkles, Award, Clock, Zap, Store
+  Leaf, HeartHandshake, ArrowRight, Sparkles, Store,
+  Clock, Award, Zap
 } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Footer from './Footer';
@@ -11,52 +12,44 @@ import Marquee from './Marquee';
 import ProductCard from '../components/ProductCard';
 import Loader from '../components/Loader';
 import AnimatedSlideshow from '../components/AnimatedSlideshow';
+import ImageSlider from '../components/animateSlide';
 import CountingNumber from '../components/CountingNumber';
 import TestimonialsSection from '../components/CustomersComment';
 import { productAPI } from '../services/api';
+import SEO from '../components/SEO';
 
-// SEO Component
-const SEOHelmet = () => (
-  <>
-    <title>Shopiverse - Premium Fashion & Accessories | Best Online Store in Bangladesh</title>
-    <meta name="description" content="Shop the latest traditional, professional and devotional wear at Shopiverse. Free shipping, easy returns, and secure payments. Best prices guaranteed." />
-    <meta name="keywords" content="online shopping, fashion, traditional wear, professional wear, devotional wear, Bangladesh, premium accessories" />
-    <meta name="author" content="Shopiverse" />
-    <meta name="robots" content="index, follow" />
-    <meta name="language" content="English" />
-    <meta name="revisit-after" content="1 days" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    
-    {/* Open Graph / Social Media */}
-    <meta property="og:type" content="website" />
-    <meta property="og:title" content="Shopiverse - Premium Fashion & Accessories" />
-    <meta property="og:description" content="Discover premium quality fashion and accessories. Shop traditional, professional and devotional wear with confidence." />
-    <meta property="og:site_name" content="Shopiverse" />
-    
-    {/* Twitter Card */}
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Shopiverse - Premium Fashion & Accessories" />
-    <meta name="twitter:description" content="Discover premium quality fashion and accessories. Shop with confidence." />
-    
-    {/* Canonical URL */}
-    <link rel="canonical" href="https://shopiverse.com" />
-    
-    {/* Schema.org markup for Google */}
-    <script type="application/ld+json">
-      {JSON.stringify({
-        "@context": "https://schema.org",
-        "@type": "WebSite",
-        "name": "Shopiverse",
-        "url": "https://shopiverse.com",
-        "potentialAction": {
-          "@type": "SearchAction",
-          "target": "https://shopiverse.com/shop?search={search_term_string}",
-          "query-input": "required name=search_term_string"
-        }
-      })}
-    </script>
-  </>
-);
+// Home Page JSON-LD for AEO/GEO/AIO
+const homeJsonLd = [
+  {
+    "@type": "WebSite",
+    "name": "Devaroti Shop",
+    "url": "https://devarotishop.com",
+    "description": "Premium multi-vendor e-commerce platform in Bangladesh for traditional, professional, and devotional wear.",
+    "potentialAction": {
+      "@type": "SearchAction",
+      "target": "https://devarotishop.com/shop?search={search_term_string}",
+      "query-input": "required name=search_term_string"
+    }
+  },
+  {
+    "@type": "Organization",
+    "name": "Devaroti Shop",
+    "url": "https://devarotishop.com",
+    "logo": "https://devarotishop.com/logo.png",
+    "sameAs": [
+      "https://facebook.com/devarotishop",
+      "https://twitter.com/devarotishop",
+      "https://instagram.com/devarotishop"
+    ],
+    "contactPoint": {
+      "@type": "ContactPoint",
+      "telephone": "+880123456789",
+      "contactType": "customer service",
+      "areaServed": "BD",
+      "availableLanguage": "Bengali"
+    }
+  }
+];
 
 // Static features data - no animations
 const features = [
@@ -115,7 +108,12 @@ const Home = () => {
 
   return (
     <>
-      <SEOHelmet />
+      <SEO 
+        title="Devaroti Shop - Premium Fashion & Accessories in Bangladesh"
+        description="Shop the latest traditional, professional, and devotional wear at Devaroti Shop. Experience premium quality, secure payments, and fast delivery."
+        keywords="Devaroti Shop, online shopping Bangladesh, traditional wear, professional clothing, devotional items, premium fashion"
+        jsonLd={homeJsonLd}
+      />
       <div className="min-h-screen bg-white">
         <HeaderTop />
         <Navbar />
@@ -170,7 +168,7 @@ const Home = () => {
               </div>
 
               {/* Right Image - Optimized */}
-              <div className="">
+              {/* <div className="">
                 <div className="relative rounded-2xl overflow-hidden shadow-xl">
                   <img
                     src="https://sudathi.com/cdn/shop/files/4769S291_1.jpg?v=1756409986&width=750"
@@ -187,7 +185,8 @@ const Home = () => {
                     </div>
                   </div>
                 </div>
-              </div>
+              </div> */}
+              <ImageSlider />
             </div>
           </div>
         </section>
@@ -280,9 +279,17 @@ const Home = () => {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {(activeTab === 'featured' ? featuredProducts :
-              activeTab === 'new' ? newArrivals : bestSellers).map((product) => (
-              <ProductCard key={product._id} product={product} />
-            ))}
+              activeTab === 'new' ? newArrivals : bestSellers).length > 0 ? (
+              (activeTab === 'featured' ? featuredProducts :
+                activeTab === 'new' ? newArrivals : bestSellers).map((product) => (
+                <ProductCard key={product._id} product={product} />
+              ))
+            ) : (
+              <div className="col-span-full py-12 text-center text-gray-500">
+                <ShoppingBag className="mx-auto w-12 h-12 mb-3 opacity-50" />
+                <p>No products found in this category.</p>
+              </div>
+            )}
           </div>
 
           <div className="text-center mt-10">

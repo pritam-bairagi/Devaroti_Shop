@@ -4,6 +4,8 @@ const Order = require('../models/Order');
 const Sale = require('../models/Sale');
 const Purchase = require('../models/Purchase');
 const Transaction = require('../models/Transaction');
+const SystemConfig = require('../models/SystemConfig');
+const HeaderHistory = require('../models/HeaderHistory');
 const { getDashboardStats } = require('../utils/analytics');
 const { syncSellerBalance } = require('../utils/balanceUtils');
 
@@ -253,6 +255,7 @@ const getAllOrders = async (req, res) => {
           select: 'name image brand user',
           populate: { path: 'user', select: 'name shopName' }
         })
+        .populate('sellers.sellerId', 'name shopName email')
         .sort({ createdAt: -1 })
         .skip((pageNum - 1) * limitNum)
         .limit(limitNum),
@@ -883,6 +886,54 @@ const updateSystemConfig = async (req, res) => {
   }
 };
 
+// @desc    Update header content & save history
+// @route   POST /api/admin/header-content
+// @access  Private/Admin
+const updateHeaderContent = async (req, res) => {
+  try {
+    const { hotline, notice } = req.body;
+
+    // Update or Insert into SystemConfig
+    await Promise.all([
+      SystemConfig.findOneAndUpdate(
+        { key: 'header_hotline' },
+        { value: hotline, updatedBy: req.user.id },
+        { upsert: true, new: true }
+      ),
+      SystemConfig.findOneAndUpdate(
+        { key: 'header_notice' },
+        { value: notice, updatedBy: req.user.id },
+        { upsert: true, new: true }
+      )
+    ]);
+
+    // Create History Document
+    const history = await HeaderHistory.create({
+      hotline,
+      notice,
+      updatedBy: req.user.id
+    });
+
+    return res.status(200).json({ success: true, message: 'Header updated and history saved', history });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Failed to update header content: ' + error.message });
+  }
+};
+
+// @desc    Get header notice history
+// @route   GET /api/admin/header-history
+// @access  Private/Admin
+const getHeaderHistory = async (req, res) => {
+  try {
+    const history = await HeaderHistory.find()
+      .populate('updatedBy', 'name email')
+      .sort({ createdAt: -1 });
+    return res.status(200).json({ success: true, history });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Failed to fetch header history: ' + error.message });
+  }
+};
+
 // @desc    Get withdrawal requests
 // @route   GET /api/admin/withdrawals
 // @access  Private/Admin
@@ -946,10 +997,40 @@ const updateWithdrawalStatus = async (req, res) => {
   }
 };
 
+// @desc    Get all pending seller requests
+// @route   GET /api/admin/seller-requests
+// @access  Private/Admin
+const getSellerRequests = async (req, res) => {
+  try {
+    const { page = 1, limit = 20 } = req.query;
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+
+    const [sellers, total] = await Promise.all([
+      User.find({ role: 'seller', isSellerApproved: false })
+        .select('-password -otp -resetPasswordToken')
+        .sort({ createdAt: -1 })
+        .skip((pageNum - 1) * limitNum)
+        .limit(limitNum),
+      User.countDocuments({ role: 'seller', isSellerApproved: false })
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      users: sellers, // Keep key name consistent with existing logic if possible
+      pagination: { page: pageNum, limit: limitNum, total, pages: Math.ceil(total / limitNum) }
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Failed to fetch seller requests: ' + error.message });
+  }
+};
+
 module.exports = {
   getStats, getAllUsers, getUserDetails, updateUser, deleteUser, approveSeller,
+  getSellerRequests, // Export new function
   getAllOrders, updateOrder, getAllProducts, createProduct, updateProduct, deleteProduct,
   getTransactions, createTransaction, getSales, createSale, getPurchases, createPurchase,
   getAnalytics, getSystemLogs, exportData, googleDriveAuth, googleDriveCallback, backupToGoogleDrive,
-  getInventoryReport, getSystemConfig, updateSystemConfig, getWithdrawalRequests, updateWithdrawalStatus
+  getInventoryReport, getSystemConfig, updateSystemConfig, getWithdrawalRequests, updateWithdrawalStatus,
+  updateHeaderContent, getHeaderHistory
 };

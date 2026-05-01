@@ -35,11 +35,12 @@ exports.errorHandler = (err, req, res, next) => {
   }
 
   const statusCode = res.statusCode === 200 ? 500 : res.statusCode;
+  const isProduction = process.env.NODE_ENV === 'production';
 
   res.status(statusCode).json({
     success: false,
-    message: err.message,
-    stack: process.env.NODE_ENV === 'production' ? null : err.stack,
+    message: isProduction && statusCode === 500 ? 'Internal Server Error' : err.message,
+    stack: isProduction ? null : err.stack,
     errors: err.errors || null
   });
 };

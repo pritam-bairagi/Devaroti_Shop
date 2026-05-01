@@ -18,6 +18,8 @@ import {
   Header, MobileMenu, FilterSidebar, CategorySidebar,
   CATEGORIES, NAV_LINKS, FILTER_GROUPS
 } from './ShopFrame';
+import ChatWindow from '../components/ChatWindow';
+import SEO from '../components/SEO';
 
 // ==================== HELPER FUNCTIONS ====================
 const formatPrice = (n) => "৳ " + n.toLocaleString("en-BD");
@@ -62,11 +64,15 @@ function ProductDetailPage({ product, allProducts, onAddCart, onWishlist, wishli
   const [newReview, setNewReview] = useState({ rating: 5, comment: '' });
   const [submitting, setSubmitting] = useState(false);
   const [relatedProducts, setRelatedProducts] = useState([]);
+  const [showChat, setShowChat] = useState(false);
+  const [selectedVariant, setSelectedVariant] = useState(null);
 
   const images = product.images?.length ? product.images : [product.image || '/placeholder.png'];
   const discount = product.oldPrice ? Math.round((1 - product.price / product.oldPrice) * 100) : null;
-  // FIX: Max quantity from available stock
-  const maxQuantity = product.quantity || 99;
+  // FIX: Max quantity from available stock (or specific variant stock)
+  const currentStock = selectedVariant ? Number(selectedVariant.stock) : (product.quantity || product.stock || 0);
+  const maxQuantity = currentStock || 99;
+  const currentPrice = selectedVariant && selectedVariant.price ? Number(selectedVariant.price) : product.price;
 
   // Fetch reviews
   useEffect(() => {
@@ -104,6 +110,7 @@ function ProductDetailPage({ product, allProducts, onAddCart, onWishlist, wishli
   useEffect(() => {
     setSelectedImage(0);
     setQuantity(1);
+    setSelectedVariant(null);
   }, [product._id]);
 
   const handleAddReview = async () => {
@@ -149,7 +156,8 @@ function ProductDetailPage({ product, allProducts, onAddCart, onWishlist, wishli
     try {
       const response = await axios.post('/api/users/cart', {
         productId: product._id,
-        quantity: quantity
+        quantity: quantity,
+        variant: selectedVariant ? { name: selectedVariant.name } : null
       }, {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       });
@@ -190,8 +198,70 @@ function ProductDetailPage({ product, allProducts, onAddCart, onWishlist, wishli
     ? reviews.reduce((acc, r) => acc + r.rating, 0) / reviews.length
     : product.rating || 0;
 
+  const productJsonLd = {
+    "@type": "Product",
+    "name": product.name,
+    "image": images,
+    "description": product.description || `Buy ${product.name} at Devaroti Shop. Premium quality ${product.category}.`,
+    "sku": product._id,
+    "mpn": product._id,
+    "brand": {
+      "@type": "Brand",
+      "name": product.brand || "Devaroti Shop"
+    },
+    "category": product.category,
+    "offers": {
+      "@type": "Offer",
+      "url": window.location.href,
+      "priceCurrency": "BDT",
+      "price": product.price,
+      "priceValidUntil": "2026-12-31",
+      "itemCondition": "https://schema.org/NewCondition",
+      "availability": product.inStock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
+      "shippingDetails": {
+        "@type": "OfferShippingDetails",
+        "shippingRate": {
+          "@type": "MonetaryAmount",
+          "value": product.price > 5000 ? 0 : 100,
+          "currency": "BDT"
+        },
+        "deliveryTime": {
+          "@type": "ShippingDeliveryTime",
+          "handlingTime": {
+            "@type": "QuantitativeValue",
+            "minValue": 0,
+            "maxValue": 1,
+            "unitCode": "DAY"
+          },
+          "transitTime": {
+            "@type": "QuantitativeValue",
+            "minValue": 1,
+            "maxValue": 5,
+            "unitCode": "DAY"
+          }
+        }
+      }
+    },
+    "aggregateRating": {
+      "@type": "AggregateRating",
+      "ratingValue": avgRating || 4.5,
+      "reviewCount": reviews.length || 1,
+      "bestRating": "5",
+      "worstRating": "1"
+    },
+    "seller": {
+      "@type": "Organization",
+      "name": getSellerName(product)
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-gray-50 pb-10">
+    <div className="min-h-screen bg-white font-sans text-gray-900 selection:bg-orange-100">
+      <SEO 
+        title={product ? product.name : "Shop Premium Products"}
+        description={product.description || "Explore our high-quality collection of products. From traditional attire to professional accessories, find everything you need at Devaroti Shop."}
+        jsonLd={productJsonLd}
+      />
       <div className="max-w-7xl mx-auto px-4 py-6">
         {/* Breadcrumb */}
         <nav className="flex items-center gap-2 text-sm text-gray-500 mb-6">
@@ -323,17 +393,47 @@ function ProductDetailPage({ product, allProducts, onAddCart, onWishlist, wishli
                     <div className="flex items-center gap-3 text-sm">
                       <Stars rating={product.sellerRating || 4.5} size="text-xs" />
                       <span className="text-gray-500">• {product.sellerReviews || 0} reviews</span>
-                      <span className="text-gray-500">• Since {product.sellerSince || '2024'}</span>
+                      <span className="text-gray-500">• Since {product.sellerSince || 'user.createdAt'}</span>
                     </div>
                   </div>
                 </div>
+                <button
+                  onClick={() => setShowChat(true)}
+                  className="mt-3 w-full flex items-center justify-center gap-2 py-2.5 bg-white border border-orange-200 text-orange-500 rounded-xl font-bold text-sm hover:bg-orange-50 transition shadow-sm"
+                >
+                  <MessageCircle size={16} />
+                  Contact Seller
+                </button>
               </div>
             </div>
+
+            {/* Variant Selection UI */}
+            {product.variants && product.variants.length > 0 && (
+              <div className="space-y-3">
+                <p className="text-sm font-bold text-gray-700 uppercase tracking-wider">Select Variant</p>
+                <div className="flex flex-wrap gap-2">
+                  {product.variants.map((v, i) => (
+                    <button
+                      key={i}
+                      onClick={() => setSelectedVariant(v)}
+                      className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all border-2 ${
+                        selectedVariant?.name === v.name
+                          ? "border-orange-500 bg-orange-50 text-orange-600"
+                          : "border-gray-200 text-gray-600 hover:border-gray-300 bg-white"
+                      }`}
+                    >
+                      {v.name}
+                      {v.price && <span className="ml-1 opacity-60">({formatPrice(v.price)})</span>}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Price Section */}
             <div className="bg-gray-50 rounded-2xl p-5 border border-gray-200">
               <div className="flex items-baseline gap-3 flex-wrap">
-                <span className="text-3xl font-bold text-orange-500">{formatPrice(product.price)}</span>
+                <span className="text-3xl font-bold text-orange-500">{formatPrice(currentPrice)}</span>
                 {product.oldPrice && (
                   <>
                     <span className="text-lg text-gray-400 line-through">{formatPrice(product.oldPrice)}</span>
@@ -343,9 +443,9 @@ function ProductDetailPage({ product, allProducts, onAddCart, onWishlist, wishli
                   </>
                 )}
               </div>
-              <p className="text-xs text-gray-500 mt-2 flex items-center gap-1">
+              {/* <p className="text-xs text-gray-500 mt-2 flex items-center gap-1">
                 <Shield size={12} /> Inclusive of all taxes • Free delivery available
-              </p>
+              </p> */}
             </div>
 
             {/* Key Features/Specs Preview */}
@@ -367,9 +467,14 @@ function ProductDetailPage({ product, allProducts, onAddCart, onWishlist, wishli
                 <span className={`font-semibold ${product.inStock ? "text-green-600" : "text-gray-500"}`}>
                   {product.inStock ? "In Stock" : "Out of Stock"}
                 </span>
-                {product.quantity > 0 && (
-                  <span className="text-sm text-gray-500">({product.quantity} units available)</span>
+                {currentStock > 0 && (
+                  <span className="text-sm text-gray-500">({currentStock} units available)</span>
                 )}
+
+                {/* total sold this product */}
+                {/* <p className="text-xs text-slate-400">{p.totalSold || 0} sold</p>
+                <span className="text-xs text-slate-400">Sold: {p.soldCount || 0}</span> */}
+
               </div>
 
               {/* FIX: Quantity capped at available stock */}
@@ -392,7 +497,7 @@ function ProductDetailPage({ product, allProducts, onAddCart, onWishlist, wishli
                     </button>
                   </div>
                   <span className="text-gray-600">
-                    Total: <span className="font-bold text-orange-500">{formatPrice(product.price * quantity)}</span>
+                    Total: <span className="font-bold text-orange-500">{formatPrice(currentPrice * quantity)}</span>
                   </span>
                 </div>
               )}
@@ -640,6 +745,24 @@ function ProductDetailPage({ product, allProducts, onAddCart, onWishlist, wishli
           </div>
         )}
       </div>
+
+      <AnimatePresence>
+        {showChat && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="w-full max-w-lg h-[600px] bg-slate-900 rounded-3xl overflow-hidden shadow-2xl relative"
+            >
+              <ChatWindow
+                receiver={product.user}
+                onClose={() => setShowChat(false)}
+              />
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -982,6 +1105,31 @@ export default function Shop() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [cartToast, setCartToast] = useState(null);
   const [categories, setCategories] = useState(CATEGORIES);
+
+  // Product Page JSON-LD
+  const productJsonLd = selectedProduct ? {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    "name": selectedProduct.name,
+    "image": selectedProduct.image,
+    "description": selectedProduct.description,
+    "brand": {
+      "@type": "Brand",
+      "name": selectedProduct.brand || "Devaroti Shop"
+    },
+    "offers": {
+      "@type": "Offer",
+      "url": window.location.href,
+      "priceCurrency": "BDT",
+      "price": selectedProduct.price,
+      "availability": selectedProduct.inStock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock"
+    },
+    "aggregateRating": {
+      "@type": "AggregateRating",
+      "ratingValue": selectedProduct.rating || 4.5,
+      "reviewCount": selectedProduct.reviews || 0
+    }
+  } : null;
 
   const { user, logout, setUser } = useAuth();
   const navigate = useNavigate();

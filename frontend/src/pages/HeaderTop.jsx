@@ -1,24 +1,45 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { Headset, Languages } from "lucide-react";
+import axios from "axios";
 
 const HeaderTop = () => {
+  const [hotline, setHotline] = useState("+880 18835 58258");
+  const [notice, setNotice] = useState("⚠️ এই সাইট টির কাজ চলমান। খুব শীগ্রেই প্রকাশ করা হবে। সাইটটি সম্পূর্ণভাবে ডিজাইন / ডেভেলপ / নিয়ন্ত্রন করছেন <b>পৃতম বৈরাগী</b> । সার্বিক যোগাযোগ : +8801883558258 । ধন্যবাদ। ⚠️");
+
+  useEffect(() => {
+    const fetchConfigs = async () => {
+      try {
+        const response = await axios.get('/api/config/public');
+        if (response.data.success) {
+          const { header_hotline, header_notice } = response.data.configs;
+          if (header_hotline) setHotline(header_hotline);
+          if (header_notice) setNotice(header_notice);
+        }
+      } catch (error) {
+        console.error('Failed to fetch header config', error);
+      }
+    };
+    fetchConfigs();
+  }, []);
+
   return (
     <header className="w-full pt-1 bg-[#E3E6F3] z-[100] shadow-md">
       <div className="max-w-7xl mx-auto flex flex-nowrap items-center justify-between px-3 py-2 gap-2">
 
         {/* Phone */}
         <div className="flex items-center text-sm text-gray-600 whitespace-nowrap">
-          <a href="tel:+8801883558258" className="flex hover:text-black gap-2 items-center">
+          <a href={`tel:${hotline.replace(/\s+/g, '')}`} className="flex hover:text-black gap-2 items-center">
             <Headset size={20} />
-            <span className="hidden sm:inline">+880 18835 58258</span>
+            <span className="hidden sm:inline">{hotline}</span>
           </a>
         </div>
 
         {/* Marquee */}
         <div className="flex-1 min-w-0 overflow-hidden relative h-5">
-          <div className="absolute whitespace-nowrap animate-marquee uppercase text-red-500">
-            ⚠️ এই সাইট টির কাজ চলমান। খুব শীগ্রেই প্রকাশ করা হবে। সাইটটি সম্পূর্ণভাবে ডিজাইন / ডেভেলপ / নিয়ন্ত্রন করছেন <b>পৃতম বৈরাগী</b> । সার্বিক যোগাযোগ : +8801883558258 । ধন্যবাদ। ⚠️
-          </div>
+          <div 
+            className="absolute whitespace-nowrap animate-marquee uppercase text-red-500"
+            dangerouslySetInnerHTML={{ __html: notice }}
+          />
         </div>
 {/* Currency / Language */}
 <div className="flex items-center gap-1 text-sm text-gray-500 whitespace-nowrap">

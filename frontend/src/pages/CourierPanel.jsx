@@ -11,7 +11,9 @@ import api from "../services/api";
 import toast from "react-hot-toast";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import Calculator from "../components/Calculator";
-import { Calculator as CalcIcon } from "lucide-react";
+import { Calculator as CalcIcon, Camera } from "lucide-react";
+import { resizeImage } from "../utils/imageUtils";
+import { courierAPI, uploadAPI } from "../services/api";
 
 const PRIMARY = '#ff5500';
 
@@ -118,7 +120,7 @@ const CourierPanel = () => {
                 <p className="text-[9px] font-bold text-slate-500 uppercase mt-0.5">Verified Courier</p>
               </div>
               <img 
-                src={`https://ui-avatars.com/api/?name=${user?.name}&background=ff5500&color=fff`} 
+                src={user?.profilePic || `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name || "C")}&background=ff5500&color=fff`} 
                 className="w-7 h-7 rounded-lg object-cover ring-2 ring-orange-500/20" 
                 alt="Avatar"
               />
@@ -381,15 +383,34 @@ const CourierPanel = () => {
         {/* ================= PROFILE ================= */}
         {activeTab === 'profile' && (
           <div className="max-w-2xl mx-auto space-y-6 text-center">
-            <div className="relative inline-block">
+            <div className="relative inline-block group">
               <img 
-                src={`https://ui-avatars.com/api/?name=${user?.name}&background=ff5500&color=fff&size=128`} 
-                className="w-32 h-32 rounded-3xl object-cover ring-4 ring-orange-500/20 shadow-2xl mx-auto" 
+                src={user?.profilePic || `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name || "C")}&background=ff5500&color=fff&size=128`} 
+                className="w-32 h-32 rounded-3xl object-cover ring-4 ring-orange-500/20 shadow-2xl mx-auto group-hover:ring-orange-500 transition-all" 
                 alt="Profile"
               />
-              <div className="absolute -bottom-2 -right-2 bg-emerald-500 p-2 rounded-xl text-white shadow-lg">
-                <CheckCircle2 size={24} />
-              </div>
+              <label className="absolute -bottom-2 -right-2 bg-orange-500 p-2 rounded-xl text-white shadow-lg cursor-pointer hover:bg-orange-600 active:scale-95 transition-all">
+                <Camera size={20} />
+                <input type="file" className="hidden" accept="image/*" onChange={async (e) => {
+                   const file = e.target.files[0];
+                   if (!file) return;
+                   const loadingToast = toast.loading('Resizing & Uploading...');
+                   try {
+                      const resized = await resizeImage(file, { maxSizeKB: 512, maxWidth: 512, maxHeight: 512 });
+                      const fd = new FormData();
+                      fd.append('images', resized);
+                      const res = await uploadAPI.uploadImages(fd);
+                      if (res.data.success) {
+                         const newPic = res.data.urls[0];
+                         await courierAPI.updateProfile({ profilePic: newPic });
+                         toast.success('Profile updated!', { id: loadingToast });
+                         window.location.reload();
+                      }
+                   } catch (err) {
+                      toast.error('Failed to upload', { id: loadingToast });
+                   }
+                }} />
+              </label>
             </div>
             
             <div>

@@ -1,70 +1,83 @@
-// frontend/src/App.jsx - Without Helmet
-import React, { useEffect } from 'react';
+import React, { useEffect, Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { Toaster } from 'react-hot-toast';
+import toast, { Toaster } from 'react-hot-toast';
 import { AuthProvider } from './contexts/AuthContext';
+import SocketProvider from './contexts/SocketContext.jsx';
+import { useSocket } from './contexts/useSocket';
 import { useAuth } from './contexts/useAuth';
-
-// Pages
-import Home from './pages/Home';
-import Shop from './pages/Shop';
-import Login from './pages/Login';
-import Register from './pages/Register';
-import Profile from './pages/Profile';
-import Dashboard from './pages/Dashboard';
-import EmailVerification from './pages/EmailVerification';
-import ForgotPassword from './pages/ForgotPassword';
-import ResetPassword from './pages/ResetPassword';
-import AdminDashboard from './pages/AdminDashboard';
-import Cart from './pages/Cart';
-import Favorites from './pages/Favorites';
-import Footer from './pages/Footer';
-import SellerRegister from './pages/SellerRegister';
-import CourierRegister from './pages/CourierRegister';
-import SellerPanel from './pages/SellerPanel';
-import CourierPanel from './pages/CourierPanel';
 
 // Components
 import FloatingShape from './components/FloatingShape';
 import Loader from './components/Loader';
-import socketService from './services/socket';
+
+// Lazy Loaded Pages
+const Home = lazy(() => import('./pages/Home'));
+const Shop = lazy(() => import('./pages/Shop'));
+const Login = lazy(() => import('./pages/Login'));
+const Register = lazy(() => import('./pages/Register'));
+const Profile = lazy(() => import('./pages/Profile'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const EmailVerification = lazy(() => import('./pages/EmailVerification'));
+const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
+const ResetPassword = lazy(() => import('./pages/ResetPassword'));
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
+const Cart = lazy(() => import('./pages/Cart'));
+const Favorites = lazy(() => import('./pages/Favorites'));
+const SellerRegister = lazy(() => import('./pages/SellerRegister'));
+const CourierRegister = lazy(() => import('./pages/CourierRegister'));
+const SellerPanel = lazy(() => import('./pages/SellerPanel'));
+const CourierPanel = lazy(() => import('./pages/CourierPanel'));
 
 // Global Socket Listener Component
 const SocketListener = () => {
   const { user } = useAuth();
+  const { on, off } = useSocket();
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !on) return;
 
     const handleNewOrder = (data) => {
-      if (user.role === 'admin') toast(`New Order #${data.orderNumber} placed!`, { icon: '📦' });
+      if (user.role === 'admin') toast(`New Order #${data.orderNumber} placed!`, { icon: '📦', duration: 5000 });
     };
 
     const handlePaymentConfirmed = (data) => {
       // If seller, check if it's their order
       if (user.role === 'seller') {
-         toast(`Order #${data.orderNumber} payment confirmed by Admin! You can now process it.`, { icon: '✅', duration: 6000 });
+         toast(`Order #${data.orderNumber} payment confirmed by Admin! You can now process it.`, { icon: '✅', duration: 8000 });
       }
     };
 
     const handleWithdrawalStatus = (data) => {
       if (user.role === 'seller') {
         const icon = data.status === 'completed' ? '💰' : '❌';
-        toast(`Your withdrawal request was ${data.status === 'completed' ? 'approved' : 'rejected'}.`, { icon });
+        toast(`Your withdrawal request was ${data.status === 'completed' ? 'approved' : 'rejected'}.`, { icon, duration: 8000 });
+      }
+    };
+
+    const handleMessageNotification = (data) => {
+      // Don't show toast if user is already on the dashboard/messages tab (we could refine this)
+      if (window.location.pathname !== '/dashboard' || !document.querySelector('[data-active-tab="messages"]')) {
+        toast(`${data.senderName}: ${data.lastMessage}`, { 
+          icon: '💬',
+          duration: 5000,
+          onClick: () => window.location.href = '/dashboard'
+        });
       }
     };
 
     // Attach listeners
-    socketService.on('new_order', handleNewOrder);
-    socketService.on('payment_confirmed', handlePaymentConfirmed);
-    socketService.on('withdrawal_status_changed', handleWithdrawalStatus);
+    on('new_order', handleNewOrder);
+    on('payment_confirmed', handlePaymentConfirmed);
+    on('withdrawal_status_changed', handleWithdrawalStatus);
+    on('message_notification', handleMessageNotification);
 
     return () => {
-      socketService.off('new_order', handleNewOrder);
-      socketService.off('payment_confirmed', handlePaymentConfirmed);
-      socketService.off('withdrawal_status_changed', handleWithdrawalStatus);
+      off('new_order', handleNewOrder);
+      off('payment_confirmed', handlePaymentConfirmed);
+      off('withdrawal_status_changed', handleWithdrawalStatus);
+      off('message_notification', handleMessageNotification);
     };
-  }, [user]);
+  }, [user, on, off]);
 
   return null;
 };
@@ -102,6 +115,18 @@ const SellerRoute = ({ children }) => {
   
   if (loading) return <Loader fullScreen />;
   if (!user || user.role !== 'seller') return <Navigate to='/' replace />;
+  if (user.role === 'seller' && !user.isSellerApproved) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-100 flex-col gap-4 p-4 text-center">
+        <div className="w-20 h-20 bg-yellow-100 rounded-full flex items-center justify-center">
+          <Store className="text-yellow-600" size={40} />
+        </div>
+        <h2 className="text-2xl font-bold">Account Pending Approval</h2>
+        <p className="text-gray-600 max-w-md">Your seller account is currently under review by our administration team. You will be notified once it is approved.</p>
+        <Link to="/" className="text-primary hover:underline mt-2">Return to Home</Link>
+      </div>
+    );
+  }
   return children;
 };
 
@@ -118,10 +143,12 @@ const CourierRoute = ({ children }) => {
 function App() {
   return (
     <AuthProvider>
-      <SocketListener />
-      <Router>
-        <Routes>
-          {/* Public Routes */}
+      <SocketProvider>
+        <SocketListener />
+        <Router>
+          <Suspense fallback={<Loader fullScreen />}>
+            <Routes>
+              {/* Public Routes */}
           <Route path='/' element={<Home />} />
           <Route path='/shop' element={<Shop />} />
           
@@ -258,7 +285,9 @@ function App() {
             },
           }}
         />
-      </Router>
+          </Suspense>
+        </Router>
+      </SocketProvider>
     </AuthProvider>
   );
 }

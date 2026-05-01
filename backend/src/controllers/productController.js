@@ -62,6 +62,7 @@ exports.getProducts = async (req, res) => {
 
     const [products, total] = await Promise.all([
       Product.find(query)
+        .select('-purchasePrice')
         .populate('user', 'name shopName profilePic')
         .sort(sortOption)
         .skip(skip)
@@ -86,6 +87,7 @@ exports.getProducts = async (req, res) => {
 exports.getProductById = async (req, res) => {
   try {
     const product = await Product.findById(req.params.id)
+      .select('-purchasePrice')
       .populate('user', 'name shopName profilePic shopLocation phoneNumber')
       .populate({
         path: 'reviews',
@@ -105,7 +107,7 @@ exports.getProductById = async (req, res) => {
       _id: { $ne: product._id },
       category: product.category,
       liveStatus: 'live'
-    }).limit(8).populate('user', 'name shopName');
+    }).select('-purchasePrice').limit(8).populate('user', 'name shopName');
 
     res.status(200).json({ success: true, product, relatedProducts });
   } catch (error) {
@@ -306,19 +308,19 @@ exports.getCategories = async (req, res) => {
 
 // @desc    Get featured products
 // @route   GET /api/products/featured
-// @access  Public
 exports.getFeaturedProducts = async (req, res) => {
   try {
-    const products = await Product.find({ liveStatus: 'live', isFeatured: true })
-      .limit(12)
-      .populate('user', 'name shopName');
-
+    const products = await Product.find({ isFeatured: true })
+      .select('-purchasePrice')
+      .populate('user', 'name shopName shopLogo profilePic')
+      .sort('-createdAt')
+      .limit(10);
     res.status(200).json({ success: true, products });
   } catch (error) {
-    console.error('Get featured products error:', error);
-    res.status(500).json({ success: false, message: 'Failed to fetch featured products: ' + error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
+
 
 // @desc    Update product stock
 // @route   PUT /api/products/:id/stock

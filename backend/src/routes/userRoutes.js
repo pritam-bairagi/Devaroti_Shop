@@ -25,8 +25,8 @@ router.put('/profile', protect, profileValidation, userController.updateProfile)
 // to avoid Express matching 'cart' as a productId param
 router.delete('/cart', protect, userController.clearCart);
 router.post('/cart', protect, cartValidation, userController.addToCart);
-router.put('/cart/:productId', protect, userController.updateCartItem);
-router.delete('/cart/:productId', protect, userController.removeFromCart);
+router.put('/cart/:cartItemId', protect, userController.updateCartItem);
+router.delete('/cart/:cartItemId', protect, userController.removeFromCart);
 
 // Favorites
 router.get('/favorites', protect, userController.getFavorites);

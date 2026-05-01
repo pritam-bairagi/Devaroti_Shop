@@ -23,8 +23,16 @@ const generateRefreshToken = (id) => {
 const getPopulatedUser = async (userId) => {
   return await User.findById(userId)
     .select('-password -otp -otpExpire -resetPasswordToken -resetPasswordExpires -reactivationToken -reactivationExpires')
-    .populate({ path: 'cart.product', select: 'name price sellingPrice image stock category' })
-    .populate({ path: 'favorites', select: 'name price sellingPrice image stock category rating' });
+    .populate({ 
+      path: 'cart.product', 
+      select: 'name price sellingPrice image stock category user',
+      populate: { path: 'user', select: 'name shopName' }
+    })
+    .populate({ 
+      path: 'favorites', 
+      select: 'name price sellingPrice image stock category rating user',
+      populate: { path: 'user', select: 'name shopName' }
+    });
 };
 
 const validatePhoneNumber = (phone) => /^01[3-9]\d{8}$/.test(phone);
@@ -198,7 +206,7 @@ const resendOTP = async (req, res) => {
             </div>
             <p>This code will expire in 10 minutes.</p>
             <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;" />
-            <p style="font-size: 12px; color: #888; text-align: center;">&copy; 2026 ${process.env.APP_NAME || 'Parash Feri'}. All rights reserved.</p>
+            <p style="font-size: 12px; color: #888; text-align: center;">&copy; 2026 ${process.env.APP_NAME || 'Devaroti Shop'}. All rights reserved.</p>
           </div>
         `
       });
@@ -436,7 +444,7 @@ const forgotPassword = async (req, res) => {
             <p>This link will expire in 10 minutes.</p>
             <p>If you didn't request a password reset, please ignore this email.</p>
             <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;" />
-            <p style="font-size: 12px; color: #888; text-align: center;">&copy; 2026 ${process.env.APP_NAME || 'Parash Feri'}. All rights reserved.</p>
+            <p style="font-size: 12px; color: #888; text-align: center;">&copy; 2026 ${process.env.APP_NAME || 'Devaroti Shop'}. All rights reserved.</p>
           </div>
         `
       });

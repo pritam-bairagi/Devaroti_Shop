@@ -4,8 +4,11 @@ const mongoose = require('mongoose');
 const messageSchema = new mongoose.Schema({
   sender: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   senderModel: { type: String, enum: ['User', 'Admin'], default: 'User' },
-  message: { type: String, required: true },
+  message: { type: String },
+  image: { type: String },
+  product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
   read: { type: Boolean, default: false },
+  isEdited: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now }
 });
 
@@ -20,5 +23,11 @@ const chatSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
 });
+
+// Indexes for faster lookups and sorting
+chatSchema.index({ user: 1, updatedAt: -1 });
+chatSchema.index({ seller: 1, updatedAt: -1 });
+chatSchema.index({ participants: 1 });
+chatSchema.index({ updatedAt: -1 });
 
 module.exports = mongoose.model('Chat', chatSchema);

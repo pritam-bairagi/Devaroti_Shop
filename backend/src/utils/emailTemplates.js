@@ -35,7 +35,7 @@ const emailTemplates = {
           </p>
         </div>
         <div class="footer">
-          &copy; ${new Date().getFullYear()} Parash Feri. All rights reserved.<br>
+          &copy; ${new Date().getFullYear()} Devaroti Shop. All rights reserved.<br>
           <small>This is an automated message, please do not reply.</small>
         </div>
       </div>
@@ -73,7 +73,7 @@ const emailTemplates = {
           <p>If you didn't request this, please ignore this email.</p>
         </div>
         <div class="footer">
-          &copy; ${new Date().getFullYear()} Parash Feri. All rights reserved.
+          &copy; ${new Date().getFullYear()} Devaroti Shop. All rights reserved.
         </div>
       </div>
     </body>
@@ -98,11 +98,11 @@ const emailTemplates = {
     <body>
       <div class="container">
         <div class="header">
-          <h1>Welcome to Parash Feri!</h1>
+          <h1>Welcome to Devaroti Shop!</h1>
         </div>
         <div class="content">
           <p>Hello <strong>${name}</strong>,</p>
-          <p>Welcome to Parash Feri! Your account has been successfully verified.</p>
+          <p>Welcome to Devaroti Shop! Your account has been successfully verified.</p>
           <p>You can now:</p>
           <div class="features">
             <div class="feature">
@@ -123,7 +123,7 @@ const emailTemplates = {
           </p>
         </div>
         <div class="footer">
-          &copy; ${new Date().getFullYear()} Parash Feri. All rights reserved.
+          &copy; ${new Date().getFullYear()} Devaroti Shop. All rights reserved.
         </div>
       </div>
     </body>
@@ -199,7 +199,7 @@ const emailTemplates = {
           </p>
         </div>
         <div class="footer">
-          &copy; ${new Date().getFullYear()} Parash Feri. All rights reserved.
+          &copy; ${new Date().getFullYear()} Devaroti Shop. All rights reserved.
         </div>
       </div>
     </body>
@@ -239,7 +239,7 @@ const emailTemplates = {
           </p>
         </div>
         <div class="footer">
-          &copy; ${new Date().getFullYear()} Parash Feri. All rights reserved.
+          &copy; ${new Date().getFullYear()} Devaroti Shop. All rights reserved.
         </div>
       </div>
     </body>

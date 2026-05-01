@@ -21,6 +21,7 @@ router.get('/track/:orderNumber', orderController.trackOrder);
 // Admin only (static — before /:id)
 router.get('/admin/all', protect, admin, orderController.getAllOrders);
 router.put('/admin/:id/confirm-payment', protect, admin, orderController.adminConfirmOrderPayment);
+router.put('/admin/:id/fail-payment', protect, admin, orderController.adminFailOrderPayment);
 
 // Seller (static — before /:id)
 router.get('/seller/list', protect, seller, orderController.getSellerOrders);

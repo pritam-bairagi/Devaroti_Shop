@@ -33,11 +33,17 @@ mongoose.connect(process.env.MONGODB_URI)
     const Purchase = require('../models/Purchase');
     const Transaction = require('../models/Transaction');
     const Review = require('../models/Review');
+    const Chat = require('../models/Chat');
+    const Coupon = require('../models/Coupon');
+    const Withdrawal = require('../models/Withdrawal');
+    const SystemConfig = require('../models/SystemConfig');
 
     // Clear ALL collections
     const pairs = [
       [User, 'Users'], [Product, 'Products'], [Order, 'Orders'],
-      [Sale, 'Sales'], [Purchase, 'Purchases'], [Transaction, 'Transactions'], [Review, 'Reviews']
+      [Sale, 'Sales'], [Purchase, 'Purchases'], [Transaction, 'Transactions'], 
+      [Review, 'Reviews'], [Chat, 'Chats'], [Coupon, 'Coupons'],
+      [Withdrawal, 'Withdrawals'], [SystemConfig, 'SystemConfigs']
     ];
     for (const [Model, name] of pairs) {
       await Model.deleteMany({});
@@ -46,6 +52,7 @@ mongoose.connect(process.env.MONGODB_URI)
 
     // Seed ONLY the 4 specified accounts
     console.log('\nSeeding accounts...');
+    // ... (keep the accounts array as is)
     const accounts = [
       {
         name: 'System Administrator',

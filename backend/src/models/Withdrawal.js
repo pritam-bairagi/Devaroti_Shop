@@ -23,7 +23,7 @@ const withdrawalSchema = new mongoose.Schema({
   paymentMethod: {
     type: String,
     required: true,
-    enum: ['Bank Transfer', 'bKash', 'Nagad', 'Rocket']
+    enum: ['Bank Transfer', 'Bank', 'bKash', 'Nagad', 'Rocket']
   },
   accountNumber: {
     type: String,

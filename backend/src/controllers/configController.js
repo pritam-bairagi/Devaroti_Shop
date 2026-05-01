@@ -6,8 +6,6 @@ const SystemConfig = require('../models/SystemConfig');
 const getPublicConfig = async (req, res) => {
   try {
     const { key } = req.params;
-    
-    // Whitelist public keys for security
     const publicKeys = [
       'bkash_number', 'nagad_number', 'rocket_number', 'bank_details',
       'site_name', 'contact_email', 'contact_phone',
@@ -15,11 +13,12 @@ const getPublicConfig = async (req, res) => {
       'membership_bronze_discount', 'membership_silver_discount', 
       'membership_gold_discount', 'membership_platinum_discount',
       'membership_bronze_delivery_discount', 'membership_silver_delivery_discount', 
-      'membership_gold_delivery_discount', 'membership_platinum_delivery_discount'
+      'membership_gold_delivery_discount', 'membership_platinum_delivery_discount',
+      'header_hotline', 'header_notice'
     ];
     
     if (!publicKeys.includes(key)) {
-      return res.status(403).json({ success: false, message: 'Access denied to this configuration' });
+      return res.status(403).json({ success: false, message: 'Access denied' });
     }
 
     const config = await SystemConfig.findOne({ key });
@@ -29,4 +28,27 @@ const getPublicConfig = async (req, res) => {
   }
 };
 
-module.exports = { getPublicConfig };
+const getPublicConfigs = async (req, res) => {
+  try {
+    const publicKeys = [
+      'bkash_number', 'nagad_number', 'rocket_number', 'bank_details',
+      'site_name', 'contact_email', 'contact_phone',
+      'delivery_charge', 'vat_percentage', 
+      'membership_bronze_discount', 'membership_silver_discount', 
+      'membership_gold_discount', 'membership_platinum_discount',
+      'membership_bronze_delivery_discount', 'membership_silver_delivery_discount', 
+      'membership_gold_delivery_discount', 'membership_platinum_delivery_discount',
+      'header_hotline', 'header_notice'
+    ];
+
+    const configs = await SystemConfig.find({ key: { $in: publicKeys } });
+    const result = {};
+    configs.forEach(c => { result[c.key] = c.value; });
+    
+    return res.status(200).json({ success: true, configs: result });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+module.exports = { getPublicConfig, getPublicConfigs };

@@ -6,33 +6,81 @@ const SimpleResponsiveSlideshow = () => {
   const slides = [
     {
       id: 1,
-      imgSrc: "1.avif",
+      imgSrc: "slide/8.png",
       alt: "Nature",
-      caption: "French Alps"
+      caption: "Pujar Ghot o Upokoronsomuho" // "Pujar Ghot and Accessories" in Bengali
     },
     {
       id: 2,
-      imgSrc: "2.avif",
+      imgSrc: "slide/2.png",
       alt: "Snow",
-      caption: "Northern Lights"
+      caption: "Yoga and Meditation" // "Yoga and Meditation" in Bengali
     },
     {
       id: 3,
-      imgSrc: "3.avif",
+      imgSrc: "slide/3.jpg",
       alt: "Mountains",
-      caption: "Beautiful Mountains"
+      caption: "Dhormimo o Shikkhamulok booi" // "Religion and Education" in Bengali
     },
     {
       id: 4,
-      imgSrc: "4.avif",
+      imgSrc: "slide/4.png",
       alt: "Forest",
-      caption: "The Rain Forest"
+      caption: "zaggo"
     },
     {
       id: 5,
-      imgSrc: "5.avif",
+      imgSrc: "slide/5.jpg",
       alt: "More Mountains",
-      caption: "Mountains!"
+      caption: "dhormio graontho"
+    },
+    {
+      id: 6,
+      imgSrc: "slide/1.jpg",
+      alt: "More Mountains",
+      caption: "pujar upokoron samoggri"
+    },
+    {
+      id: 7,
+      imgSrc: "slide/9.png",
+      alt: "More Mountains",
+      caption: "Traditional Dresses" // "Traditional Dresses" in Bengali
+    },
+    {
+      id: 8,
+      imgSrc: "slide/10.jpg",
+      alt: "More Mountains",
+      caption: "Pujay baborito pata" // "Puja's favorite leaves" in Bengali
+    },
+    {
+      id: 9,
+      imgSrc: "slide/11.png",
+      alt: "More Mountains",
+      caption: "Pujay baborito fol" // "Puja's favorite fruits" in Bengali
+    },
+    {
+      id: 10,
+      imgSrc: "slide/12.png",
+      alt: "More Mountains",
+      caption: "Pujay baborito full" // "Puja's favorite flowers" in Bengali
+    },
+    {
+      id: 11,
+      imgSrc: "slide/13.png",
+      alt: "More Mountains",
+      caption: "Mul dhormio booi" // "Main religious books" in Bengali
+    },
+    {
+      id: 12,
+      imgSrc: "slide/14.png",
+      alt: "More Mountains",
+      caption: "sanaskriti o parampora" // "Culture and Tradition" in Bengali
+    },
+    {
+      id: 13,
+      imgSrc: "slide/15.png",
+      alt: "More Mountains",
+      caption: "Pujay baborito gach" // "Puja's favorite trees" in Bengali
     }
   ];
 
